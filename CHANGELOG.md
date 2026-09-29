@@ -10,6 +10,7 @@
 - Implement GET METADATA for all key references: algorithm, enforced PIN/touch policy,
   origin and public key for the asymmetric slots (stored at import/generate time), retry
   counters for PIN and PUK, and algorithm and default flag for the management key ([#15][])
+- Derive the GET SERIAL response from the device uuid instead of a shared constant
 - Fix the PUK being initialized with the PIN's retry counter (3) instead of its own (5)
 
 [#15]: https://github.com/trussed-dev/piv-authenticator/issues/15
