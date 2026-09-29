@@ -90,7 +90,11 @@ impl<'l> TryFrom<&'l [u8]> for Select<'l> {
     /// We allow ourselves the option of answering to more than just the official PIV AID.
     /// For instance, to offer additional functionality, under our own RID.
     fn try_from(data: &'l [u8]) -> Result<Self, Self::Error> {
-        if crate::constants::PIV_AID.matches(data) {
+        // Also answer ISO 7816-4 partial application selection: the Yubico
+        // ecosystem (ykman, yubico-piv-tool, piv-go, yubikey.rs) selects PIV
+        // with only the 5 byte RID `A0 00 00 03 08`.
+        let is_partial = data.len() >= 5 && crate::constants::PIV_AID.as_bytes().starts_with(data);
+        if crate::constants::PIV_AID.matches(data) || is_partial {
             Ok(Self { aid: data })
         } else {
             Err(Status::NotFound)
@@ -166,10 +170,14 @@ impl TryFrom<VerifyArguments<'_>> for Verify {
         }
         Ok(match (logout.0, data.len()) {
             (false, 0) => Verify::Status(key_reference),
-            (false, 8) => Verify::Login(VerifyLogin::PivPin(
-                data.try_into()
-                    .map_err(|_| Status::IncorrectDataParameter)?,
-            )),
+            // A malformed PIN of the right length is still handed to the
+            // verification: it can never match the stored PIN (which was
+            // validated when set), so it burns a retry exactly like a wrong
+            // PIN does on a YubiKey. Clients (yubikey.rs, ykman) exhaust the
+            // retry counter before RESET by verifying with eight 0xFF bytes.
+            (false, 8) => Verify::Login(VerifyLogin::PivPin(Pin(data
+                .try_into()
+                .map_err(|_| Status::IncorrectDataParameter)?))),
             (false, _) => return Err(Status::IncorrectDataParameter),
             (true, 0) => Verify::Logout(key_reference),
             (true, _) => return Err(Status::IncorrectDataParameter),

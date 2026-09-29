@@ -141,6 +141,18 @@ where
         use piv_types::Algorithms::*;
         info!("selecting PIV maybe");
 
+        // Selecting the application resets the security state like it does on
+        // a YubiKey: clients rely on this -- yubikey.rs re-selects the applet
+        // specifically to drop PIN verification before querying the retry
+        // counter, and would otherwise mistake a verified session for one with
+        // no retries left
+        self.state.volatile.clear_pin_verified(&mut self.trussed);
+        self.state.volatile.app_security_status.pin_just_verified = false;
+        self.state
+            .volatile
+            .app_security_status
+            .administrator_verified = false;
+
         let application_property_template = piv_types::ApplicationPropertyTemplate::default()
             .with_application_label(self.options.label)
             .with_application_url(self.options.url)
@@ -213,8 +225,13 @@ where
             }
 
             YubicoPivExtension::GetVersion => {
-                // make up a version, be >= 5.0.0
-                reply.extend_from_slice(&[0x06, 0x06, 0x06]).ok();
+                // Report a firmware version whose feature set matches what this
+                // app implements: clients gate the default management key
+                // algorithm (3DES below 5.7) and GET METADATA (5.3 and later)
+                // on it, and yubikey.rs only accepts serial retrieval for
+                // major version 5, so neither an honest 0.x nor a made-up 6.x
+                // works.
+                reply.extend_from_slice(&[0x05, 0x04, 0x00]).ok();
             }
 
             YubicoPivExtension::Attest(_slot) => return Err(Status::FunctionNotSupported),
@@ -378,7 +395,14 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             .persistent
             .change_pin(&old_pin, &new_pin, self.trussed)
         {
-            return Err(Status::VerificationFailed);
+            // report the remaining retries like VERIFY does, and blocked once
+            // they are exhausted -- clients drive the retry counter through
+            // this status
+            let remaining = self.state.persistent.remaining_pin_retries(self.trussed);
+            if remaining == 0 {
+                return Err(Status::OperationBlocked);
+            }
+            return Err(Status::RemainingRetries(remaining));
         }
         assert!(self
             .state
@@ -394,7 +418,11 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             .persistent
             .change_puk(&old_puk, &new_puk, self.trussed)
         {
-            return Err(Status::VerificationFailed);
+            let remaining = self.state.persistent.remaining_puk_retries(self.trussed);
+            if remaining == 0 {
+                return Err(Status::OperationBlocked);
+            }
+            return Err(Status::RemainingRetries(remaining));
         }
         Ok(())
     }
@@ -1003,6 +1031,14 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             if ContainerStorage(c).exists(self.trussed, self.options.storage)? {
                 num_certs += 1;
             }
+        }
+
+        // A YubiKey has no key history object until one is written. Some
+        // clients (yubikey.rs) read this object while enumerating certificates
+        // and fail on data that does not parse as one, so stay absent while
+        // there is nothing to report.
+        if num_certs == 0 {
+            return Err(Status::NotFound);
         }
 
         reply.expand(&[0xC1, 0x01])?;

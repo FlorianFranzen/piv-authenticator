@@ -12,6 +12,12 @@
   counters for PIN and PUK, and algorithm and default flag for the management key ([#15][])
 - Derive the GET SERIAL response from the device uuid instead of a shared constant
 - Fix the PUK being initialized with the PIN's retry counter (3) instead of its own (5)
+- Compatibility with Yubico ecosystem clients (ykman, yubico-piv-tool, piv-go,
+  yubikey.rs), verified by provisioning the virtual card end to end with a YubiKey
+  provisioning tool: partial (5 byte RID) application selection, firmware version 5.4.0
+  instead of 6.6.6, security state reset on SELECT, malformed PINs burning a retry,
+  retry counts reported from CHANGE REFERENCE DATA, and an absent key history object
+  while no retired certificate exists
 
 [#15]: https://github.com/trussed-dev/piv-authenticator/issues/15
 [#16]: https://github.com/trussed-dev/piv-authenticator/issues/16
