@@ -345,6 +345,18 @@ enum IoCmd {
         #[serde(default)]
         expected_status: Status,
     },
+    /// Run GET METADATA for a slot holding an imported ECC key and match the
+    /// full reply, with the expected public key recomputed from the scalar
+    CheckMetadata {
+        key_reference: u8,
+        /// Hex-encoded private scalar the slot was imported with
+        scalar: String,
+        pin_policy: u8,
+        touch_policy: u8,
+        origin: u8,
+        #[serde(default)]
+        expected_status: Status,
+    },
     /// Sign a digest with an imported ECC key and verify the signature against
     /// the verifying key recomputed from the imported scalar (ECDSA is
     /// randomized, so the signature bytes cannot be matched directly)
@@ -458,6 +470,22 @@ impl IoCmd {
                 algo,
                 expected_status,
             } => Self::run_import_ecc_key(*key_reference, scalar, *algo, *expected_status, card),
+            Self::CheckMetadata {
+                key_reference,
+                scalar,
+                pin_policy,
+                touch_policy,
+                origin,
+                expected_status,
+            } => Self::run_check_metadata(
+                *key_reference,
+                scalar,
+                *pin_policy,
+                *touch_policy,
+                *origin,
+                *expected_status,
+                card,
+            ),
             Self::SignEcc {
                 key_reference,
                 data,
@@ -547,6 +575,46 @@ impl IoCmd {
         Self::run_bytes(
             &build_command(0x00, 0xFE, algo, key_reference, &data, 0),
             &MATCH_EMPTY,
+            expected_status,
+            card,
+        );
+    }
+
+    fn run_check_metadata(
+        key_reference: u8,
+        scalar: &str,
+        pin_policy: u8,
+        touch_policy: u8,
+        origin: u8,
+        expected_status: Status,
+        card: &mut setup::Piv,
+    ) {
+        let scalar = parse_hex(scalar);
+        let (algo, point): (u8, Vec<u8>) = match scalar.len() {
+            32 => {
+                let key = p256::ecdsa::SigningKey::from_slice(&scalar).unwrap();
+                let point = key.verifying_key().to_encoded_point(false);
+                (0x11, point.as_bytes().to_vec())
+            }
+            48 => {
+                let key = p384::ecdsa::SigningKey::from_slice(&scalar).unwrap();
+                let point = key.verifying_key().to_encoded_point(false);
+                (0x14, point.as_bytes().to_vec())
+            }
+            _ => panic!("Invalid ECC scalar size"),
+        };
+        let expected: Vec<u8> = [
+            tlv(&[0x01], &[algo]),
+            tlv(&[0x02], &[pin_policy, touch_policy]),
+            tlv(&[0x03], &[origin]),
+            tlv(&[0x04], &tlv(&[0x86], &point)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        Self::run_bytes(
+            &build_command(0x00, 0xF7, 0x00, key_reference, &[], 0xFF),
+            &OutputMatcher::Bytes(Cow::Owned(expected)),
             expected_status,
             card,
         );

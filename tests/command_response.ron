@@ -387,7 +387,7 @@
                 new: "0102030405060708",
             ),
             VerifyApplicationPin(pin: "313233343536FFFF", expected_status: RemainingRetries(2)),
-            ResetRetryCounter(puk: "FFFFFFFFFFFFFFFF", new_pin: "3132333435363738", expected_status: RemainingRetries(2)),
+            ResetRetryCounter(puk: "FFFFFFFFFFFFFFFF", new_pin: "3132333435363738", expected_status: RemainingRetries(4)),
             VerifyApplicationPin(pin: "3132333435363738", expected_status: RemainingRetries(1)),
             ResetRetryCounter(puk: "0102030405060708", new_pin: "3132333435363738"),
             VerifyApplicationPin(pin: "3132333435363738"),
@@ -525,6 +525,53 @@
             ImportEccKey(
                 key_reference: 0x83,
                 scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+            ),
+            // metadata reports algorithm, enforced policy, origin and public key
+            CheckMetadata(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+                pin_policy: 0x02, // once
+                touch_policy: 0x01, // never
+                origin: 0x02, // imported
+            ),
+            CheckMetadata(
+                key_reference: 0x9C,
+                scalar: "1111111111111111111111111111111111111111111111111111111111111111",
+                pin_policy: 0x03, // always
+                touch_policy: 0x01,
+                origin: 0x02,
+            ),
+            CheckMetadata(
+                key_reference: 0x9E,
+                scalar: "2222222222222222222222222222222222222222222222222222222222222222",
+                pin_policy: 0x01, // never
+                touch_policy: 0x01,
+                origin: 0x02,
+            ),
+            CheckMetadata(
+                key_reference: 0x83,
+                scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+                pin_policy: 0x02,
+                touch_policy: 0x01,
+                origin: 0x02,
+            ),
+            // an empty slot has no metadata
+            IoData(
+                input: "00 F7 00 84 00",
+                expected_status: KeyReferenceNotFound,
+            ),
+            // PIN, PUK and management key metadata
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 06 02 03 03"),
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 06 02 05 05"),
+            ),
+            IoData(
+                input: "00 F7 00 9B 00",
+                output: Data("01 01 03 02 02 01 01 05 01 01"),
             ),
             // a truncated scalar is rejected
             ImportEccKey(
