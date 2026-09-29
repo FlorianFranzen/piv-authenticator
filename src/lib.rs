@@ -1051,7 +1051,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
         &mut self,
         algo: AsymmetricAlgorithms,
         key: AsymmetricKeyReference,
-        #[cfg_attr(not(feature = "rsa"), allow(unused))] data: &[u8],
+        data: &[u8],
         mut _reply: Reply<'_>,
     ) -> Result {
         if !self
@@ -1070,7 +1070,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 AsymmetricAlgorithms::Rsa2048
                 | AsymmetricAlgorithms::Rsa3072
                 | AsymmetricAlgorithms::Rsa4096,
-                AsymmetricKeyReference::PivAuthentication,
+                _,
             ) => {
                 use trussed_rsa_types::RsaImportFormat;
                 let p = tlv::get_do(&[0x01], data).ok_or(Status::IncorrectDataParameter)?;
@@ -1082,7 +1082,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                         error!("Failed rsa import serialization: {_err:?}");
                         Status::UnspecifiedNonpersistentExecutionError
                     })?,
-                    AsymmetricKeyReference::PivAuthentication.storage(self.options.storage),
+                    key.storage(self.options.storage),
                     KeySerialization::RsaParts
                 ))
                 .key;
@@ -1095,6 +1095,53 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 );
                 Ok(())
             }
+            (AsymmetricAlgorithms::P256 | AsymmetricAlgorithms::P384, _) => {
+                // Yubico clients (ykman, yubikey.rs, piv-go) send the private scalar in DO
+                // 0x06, zero-padded to the curve's scalar size, optionally followed by the
+                // pin (0xAA) and touch (0xAB) policy DOs.
+                let scalar = tlv::get_do(&[0x06], data).ok_or(Status::IncorrectDataParameter)?;
+                let expected_len = match algo {
+                    AsymmetricAlgorithms::P256 => 32,
+                    AsymmetricAlgorithms::P384 => 48,
+                    #[allow(unreachable_patterns)]
+                    _ => unreachable!(),
+                };
+                if scalar.len() != expected_len {
+                    warn!(
+                        "ECC import with scalar of length {}, expected {expected_len}",
+                        scalar.len()
+                    );
+                    return Err(Status::IncorrectDataParameter);
+                }
+                // the backend rejects out-of-range scalars, but the software fallback
+                // used by the virt platform accepts zero, so rule the degenerate case
+                // out here to keep behaviour identical across backends
+                if scalar.iter().all(|&b| b == 0) {
+                    warn!("ECC import with the zero scalar");
+                    return Err(Status::IncorrectDataParameter);
+                }
+                let id = try_syscall!(self.trussed.unsafe_inject_key(
+                    algo.key_mechanism(),
+                    scalar,
+                    key.storage(self.options.storage),
+                    KeySerialization::Raw
+                ))
+                .map_err(|_err| {
+                    // an out-of-range scalar (zero or >= the group order) is rejected here
+                    warn!("Failed ECC import: {_err:?}");
+                    Status::IncorrectDataParameter
+                })?
+                .key;
+                self.state.persistent.replace_asymmetric_key(
+                    key,
+                    algo,
+                    id,
+                    self.trussed,
+                    self.options.storage,
+                );
+                Ok(())
+            }
+            #[allow(unreachable_patterns)]
             _ => Err(Status::FunctionNotSupported),
         }
     }
