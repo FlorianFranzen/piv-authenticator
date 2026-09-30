@@ -27,7 +27,7 @@ pub enum YubicoPivExtension {
     ImportAsymmetricKey(AsymmetricAlgorithms, AsymmetricKeyReference),
     GetVersion,
     Reset,
-    SetPinRetries,
+    SetPinRetries { pin_retries: u8, puk_retries: u8 },
     Attest(AttestKeyReference),
     GetSerial, // also used via 0x01
     GetMetadata(KeyReference),
@@ -393,8 +393,12 @@ impl<'l> TryFrom<iso7816::command::CommandView<'l>> for Command<'l> {
             (0x00, Instruction::Unknown(0xfb), 0x00, 0x00) => {
                 Self::YkExtension(YubicoPivExtension::Reset)
             }
-            (0x00, Instruction::Unknown(0xfa), 0x00, 0x00) => {
-                Self::YkExtension(YubicoPivExtension::SetPinRetries)
+            // P1 is the new PIN retry count, P2 the new PUK retry count
+            (0x00, Instruction::Unknown(0xfa), pin_retries, puk_retries) => {
+                Self::YkExtension(YubicoPivExtension::SetPinRetries {
+                    pin_retries,
+                    puk_retries,
+                })
             }
             // (0x00, 0xf9, 0x9a, 0x00)
             (0x00, Instruction::Unknown(0xf9), _, 0x00) => Self::YkExtension(

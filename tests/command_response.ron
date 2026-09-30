@@ -632,6 +632,50 @@
         ]
     ),
     IoTest(
+        name: "Set pin retries",
+        cmd_resp: [
+            // needs management authentication and a verified pin
+            IoData(
+                input: "00 FA 05 06 00",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            IoData(
+                input: "00 FA 05 06 00",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            VerifyApplicationPin(),
+            // zero counts would brick a pin
+            IoData(
+                input: "00 FA 00 06 00",
+                expected_status: IncorrectP1OrP2Parameter,
+            ),
+            // set pin to 5 tries, puk to 6
+            IoData(
+                input: "00 FA 05 06 00",
+            ),
+            // pin and puk are reset to their defaults with the new counts; a wrong pin
+            // now reports the fresh count
+            VerifyApplicationPin(pin: "3131313131313131", expected_status: RemainingRetries(4)),
+            VerifyApplicationPin(),
+            // metadata reflects the new counts
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 06 02 05 05"),
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 06 02 06 06"),
+            ),
+        ]
+    ),
+    IoTest(
         name: "msroots objects",
         cmd_resp: [
             GetData(
