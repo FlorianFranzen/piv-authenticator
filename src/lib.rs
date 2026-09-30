@@ -38,7 +38,8 @@ use iso7816::Status;
 use trussed_auth::AuthClient;
 use trussed_core::mechanisms::Tdes;
 use trussed_core::types::{
-    KeyId, KeySerialization, Location, Mechanism, Message, PathBuf, StorageAttributes,
+    KeyId, KeySerialization, Location, Mechanism, Message, PathBuf, SignatureSerialization,
+    StorageAttributes,
 };
 use trussed_core::{
     syscall, try_syscall, CryptoClient, FilesystemClient, ManagementClient, UiClient,
@@ -816,6 +817,38 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 let Some(key) = key? else {
                     return Err(Status::ConditionsOfUseNotSatisfied);
                 };
+
+                // Arbitrary-length message, not a fixed digest: skip the length check.
+                let sign_raw_message = key.alg == AsymmetricAlgorithms::Ed25519 || {
+                    #[cfg(feature = "mldsa44")]
+                    {
+                        key.alg == AsymmetricAlgorithms::MlDsa44
+                    }
+                    #[cfg(not(feature = "mldsa44"))]
+                    {
+                        false
+                    }
+                };
+                if sign_raw_message {
+                    let signature = syscall!(trussed.sign(
+                        key.alg.sign_mechanism(),
+                        key.key,
+                        message,
+                        SignatureSerialization::Raw,
+                    ))
+                    .signature;
+
+                    reply.expand(&[0x7C])?;
+                    let offset = reply.len();
+                    {
+                        reply.expand(&[0x82])?;
+                        reply.append_len(signature.len())?;
+                        reply.expand(&signature)?;
+                    }
+                    reply.prepend_len(offset)?;
+                    return Ok(());
+                }
+
                 if key.alg.sign_len() != message.len() {
                     return Err(Status::IncorrectDataParameter);
                 }
@@ -1241,6 +1274,42 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 }
                 Ok(())
             }
+            (AsymmetricAlgorithms::Ed25519, _) => {
+                // Yubico clients send the raw 32 byte private key in DO 0x07
+                let seed = tlv::get_do(&[0x07], data).ok_or(Status::IncorrectDataParameter)?;
+                if seed.len() != 32 {
+                    warn!("Ed25519 import with key of length {}", seed.len());
+                    return Err(Status::IncorrectDataParameter);
+                }
+                let id = try_syscall!(self.trussed.unsafe_inject_key(
+                    algo.key_mechanism(),
+                    seed,
+                    key.storage(self.options.storage),
+                    KeySerialization::Raw
+                ))
+                .map_err(|_err| {
+                    warn!("Failed Ed25519 import: {_err:?}");
+                    Status::IncorrectDataParameter
+                })?
+                .key;
+                self.store_imported_key_metadata(algo, key, id)?;
+                self.state
+                    .persistent
+                    .keys
+                    .policies
+                    .set_policy(key, pin_policy, touch_policy);
+                self.state.persistent.replace_asymmetric_key(
+                    key,
+                    algo,
+                    id,
+                    self.trussed,
+                    self.options.storage,
+                );
+                if key.is_encrypted() {
+                    syscall!(self.trussed.clear(id));
+                }
+                Ok(())
+            }
             #[allow(unreachable_patterns)]
             _ => Err(Status::FunctionNotSupported),
         }
@@ -1392,6 +1461,31 @@ fn serialize_public_key<T: crate::Client>(
             reply.expand(&[0x86])?;
             reply.append_len(serialized_key.len() + 1)?;
             reply.expand(&[0x04])?;
+            reply.expand(&serialized_key)?;
+        }
+        // Raw 32 byte key in 0x86; no SEC1 prefix
+        AsymmetricAlgorithms::Ed25519 => {
+            let serialized_key = syscall!(trussed.serialize_key(
+                algo.key_mechanism(),
+                public_key,
+                KeySerialization::Raw
+            ))
+            .serialized_key;
+            reply.expand(&[0x86])?;
+            reply.append_len(serialized_key.len())?;
+            reply.expand(&serialized_key)?;
+        }
+        // Raw 1312 byte key in 0x86
+        #[cfg(feature = "mldsa44")]
+        AsymmetricAlgorithms::MlDsa44 => {
+            let serialized_key = syscall!(trussed.serialize_key(
+                Mechanism::MlDsa44,
+                public_key,
+                KeySerialization::Raw
+            ))
+            .serialized_key;
+            reply.expand(&[0x86])?;
+            reply.append_len(serialized_key.len())?;
             reply.expand(&serialized_key)?;
         }
         #[cfg(feature = "rsa")]
