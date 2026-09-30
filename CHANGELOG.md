@@ -18,9 +18,21 @@
   instead of 6.6.6, security state reset on SELECT, malformed PINs burning a retry,
   retry counts reported from CHANGE REFERENCE DATA, and an absent key history object
   while no retired certificate exists
+- Store and enforce the per-slot pin and touch policies requested through the Yubico
+  DOs at key import and generation, and the touch requirement on the management key
+  (P2 of SET MANAGEMENT KEY, whose parsing was inverted). Touch prompts go through
+  trussed's user-presence request like opcard's UIF support; "cached" reuses a touch
+  for 15 seconds. Pin policy "never" is rejected on every slot but 9E, whose key alone
+  is not stored sealed to the PIN ([#31][], [#32][])
+- Add the Yubico msroots data objects (5FFF11-5FFF15)
+- Implement the Yubico SET PIN RETRIES extension (INS 0xFA): resets PIN and PUK to
+  their defaults with the new retry counts, preserving the provisioned keys
+- Report the management key default flag as false once the key differs from the default
 
 [#15]: https://github.com/trussed-dev/piv-authenticator/issues/15
 [#16]: https://github.com/trussed-dev/piv-authenticator/issues/16
+[#31]: https://github.com/trussed-dev/piv-authenticator/issues/31
+[#32]: https://github.com/trussed-dev/piv-authenticator/issues/32
 
 ## [v0.7.0][] (2026-08-17)
 

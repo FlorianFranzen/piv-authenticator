@@ -38,17 +38,64 @@ const HPKE_SEALKEY_CONTAINER_INFO: &[u8] = b"Container Storage";
 /// Info parameter for the container storage
 const HPKE_SEALKEY_REFERENCE_INFO: &[u8] = b"Key Storage";
 
+#[derive(PartialEq, Eq, Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub enum PinPolicy {
     Never,
     Once,
     Always,
 }
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+impl PinPolicy {
+    /// The encoding used by the Yubico policy DO `0xAA` and by GET METADATA
+    pub fn byte(self) -> u8 {
+        match self {
+            Self::Never => 1,
+            Self::Once => 2,
+            Self::Always => 3,
+        }
+    }
+}
+
+impl TryFrom<u8> for PinPolicy {
+    type Error = Status;
+    fn try_from(value: u8) -> Result<Self, Status> {
+        match value {
+            1 => Ok(Self::Never),
+            2 => Ok(Self::Once),
+            3 => Ok(Self::Always),
+            _ => Err(Status::IncorrectDataParameter),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub enum TouchPolicy {
     Never,
     Always,
     Cached,
+}
+
+impl TouchPolicy {
+    /// The encoding used by the Yubico policy DO `0xAB` and by GET METADATA
+    pub fn byte(self) -> u8 {
+        match self {
+            Self::Never => 1,
+            Self::Always => 2,
+            Self::Cached => 3,
+        }
+    }
+}
+
+impl TryFrom<u8> for TouchPolicy {
+    type Error = Status;
+    fn try_from(value: u8) -> Result<Self, Status> {
+        match value {
+            1 => Ok(Self::Never),
+            2 => Ok(Self::Always),
+            3 => Ok(Self::Cached),
+            _ => Err(Status::IncorrectDataParameter),
+        }
+    }
 }
 
 crate::container::enum_subset! {
@@ -130,6 +177,59 @@ pub struct Keys {
     // 0x82..=0x95 (130-149)
     pub retired_keys: [Option<AsymmetricAlgorithms>; 20],
     // TODO secure_messaging
+    /// Pin and touch policies requested through the Yubico DOs at key import or
+    /// generation; slots without an entry use the spec defaults
+    #[serde(default)]
+    pub policies: KeyPolicies,
+}
+
+/// Requested per-slot policies, indexed by [`AsymmetricKeyReference`] discriminant,
+/// plus the touch requirement on the management key
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct KeyPolicies {
+    #[serde(default)]
+    slots: [Option<(PinPolicy, TouchPolicy)>; 24],
+    #[serde(default)]
+    pub admin_touch: bool,
+}
+
+impl KeyPolicies {
+    /// The default policy a slot has when none was requested, per SP 800-73-4 and
+    /// matching what the enforcement did before policies became configurable
+    pub fn default_policy(key: AsymmetricKeyReference) -> (PinPolicy, TouchPolicy) {
+        let pin = match key {
+            AsymmetricKeyReference::DigitalSignature => PinPolicy::Always,
+            AsymmetricKeyReference::CardAuthentication => PinPolicy::Never,
+            _ => PinPolicy::Once,
+        };
+        (pin, TouchPolicy::Never)
+    }
+
+    pub fn policy(&self, key: AsymmetricKeyReference) -> (PinPolicy, TouchPolicy) {
+        self.slots[key as usize].unwrap_or_else(|| Self::default_policy(key))
+    }
+
+    /// Store the policy requested at import or generation; absent halves fall back
+    /// to the slot's default
+    pub fn set_policy(
+        &mut self,
+        key: AsymmetricKeyReference,
+        pin: Option<PinPolicy>,
+        touch: Option<TouchPolicy>,
+    ) {
+        let (default_pin, default_touch) = Self::default_policy(key);
+        self.slots[key as usize] =
+            Some((pin.unwrap_or(default_pin), touch.unwrap_or(default_touch)));
+    }
+
+    /// The security condition the stored (or default) pin policy demands
+    pub fn security_condition(&self, key: AsymmetricKeyReference) -> SecurityCondition {
+        match self.policy(key).0 {
+            PinPolicy::Never => SecurityCondition::Always,
+            PinPolicy::Once => SecurityCondition::Pin,
+            PinPolicy::Always => SecurityCondition::PinAlways,
+        }
+    }
 }
 
 impl Keys {
@@ -347,7 +447,7 @@ impl LoadedState<'_> {
         options: &crate::Options,
         just_verified: bool,
     ) -> Result<Option<UseValidKey>, Status> {
-        let security_condition = key.use_security_condition();
+        let security_condition = self.persistent.keys.policies.security_condition(key);
         match security_condition {
             SecurityCondition::PinAlways if just_verified => {}
             SecurityCondition::Pin
@@ -355,6 +455,8 @@ impl LoadedState<'_> {
             SecurityCondition::Always => {}
             _ => return Err(Status::SecurityStatusNotSatisfied),
         };
+
+        self.check_touch(self.persistent.keys.policies.policy(key).1, client)?;
 
         let key_with_alg = self.persistent.keys.asymetric_for_reference(key);
         let alg = match key_with_alg {
@@ -396,6 +498,46 @@ impl LoadedState<'_> {
             alg,
             need_clear: true,
         }))
+    }
+
+    /// Demand a touch according to the policy: always, never, or reusing one that is
+    /// at most 15 seconds old (the YubiKey "cached" window)
+    pub fn check_touch(
+        &mut self,
+        policy: TouchPolicy,
+        client: &mut impl crate::Client,
+    ) -> Result<(), Status> {
+        const CACHE_WINDOW: core::time::Duration = core::time::Duration::from_secs(15);
+
+        match policy {
+            TouchPolicy::Never => return Ok(()),
+            TouchPolicy::Cached => {
+                let now = try_syscall!(client.uptime())
+                    .map_err(|_| Status::UnspecifiedNonpersistentExecutionError)?
+                    .uptime;
+                if let Some(last) = self.volatile.last_touch {
+                    if now.saturating_sub(last) < CACHE_WINDOW {
+                        return Ok(());
+                    }
+                }
+            }
+            TouchPolicy::Always => {}
+        }
+
+        let confirmed = try_syscall!(client.confirm_user_present(15_000))
+            .map_err(|_err| {
+                error!("Failed to request user presence: {_err:?}");
+                Status::UnspecifiedNonpersistentExecutionError
+            })?
+            .result
+            .is_ok();
+        if !confirmed {
+            warn!("User presence check failed or timed out");
+            return Err(Status::SecurityStatusNotSatisfied);
+        }
+
+        self.volatile.last_touch = try_syscall!(client.uptime()).ok().map(|r| r.uptime);
+        Ok(())
     }
 }
 
@@ -449,6 +591,8 @@ pub struct Volatile {
     // pub currently_selected_application: SelectableAid,
     pub app_security_status: AppSecurityStatus,
     pub command_cache: Option<CommandCache>,
+    /// Uptime of the last confirmed touch, backing the "cached" touch policy
+    pub last_touch: Option<core::time::Duration>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -805,6 +949,8 @@ impl Persistent {
         .key;
         let old_management_key = self.keys.administration.id;
         self.keys.administration = KeyWithAlg { id, alg };
+        self.keys.is_admin_default = management_key == YUBICO_DEFAULT_MANAGEMENT_KEY
+            && alg == YUBICO_DEFAULT_MANAGEMENT_KEY_ALG;
         self.save(client);
         syscall!(client.delete(old_management_key));
     }
@@ -1071,6 +1217,7 @@ impl Persistent {
             key_management_alg: None,
             card_authentication: None,
             retired_keys: Default::default(),
+            policies: Default::default(),
         };
 
         let mut state = Self {
