@@ -15,6 +15,8 @@
 - Implement GET METADATA for all key references: algorithm, enforced PIN/touch policy,
   origin and public key for the asymmetric slots (stored at import/generate time), retry
   counters for PIN and PUK, and algorithm and default flag for the management key ([#15][])
+- Implement the Yubico SET PIN RETRIES extension: resets PIN and PUK to their defaults
+  with the new retry counts while keeping the provisioned keys
 
 [#15]: https://github.com/trussed-dev/piv-authenticator/issues/15
 [#16]: https://github.com/trussed-dev/piv-authenticator/issues/16
