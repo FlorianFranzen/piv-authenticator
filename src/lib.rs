@@ -13,7 +13,10 @@ pub use commands::{Command, YubicoPivExtension};
 use commands::{GeneralAuthenticate, PutData, ResetRetryCounter};
 pub mod constants;
 pub mod container;
-use container::{AuthenticateKeyReference, Container, GenerateKeyReference, KeyReference};
+use container::{
+    AuthenticateKeyReference, Container, GenerateKeyReference, KeyReference, SecurityCondition,
+};
+use piv_types::Algorithms;
 #[cfg(feature = "apdu-dispatch")]
 mod dispatch;
 pub mod piv_types;
@@ -34,7 +37,9 @@ use heapless_bytes::Bytes;
 use iso7816::Status;
 use trussed_auth::AuthClient;
 use trussed_core::mechanisms::Tdes;
-use trussed_core::types::{KeySerialization, Location, Mechanism, PathBuf, StorageAttributes};
+use trussed_core::types::{
+    KeyId, KeySerialization, Location, Mechanism, Message, PathBuf, StorageAttributes,
+};
 use trussed_core::{syscall, try_syscall, CryptoClient, FilesystemClient};
 
 use constants::*;
@@ -235,13 +240,9 @@ where
                     .yubico_set_administration_key(data, touch_policy, reply)?;
             }
 
-            YubicoPivExtension::GetMetadata(KeyReference::CardAuthentication) => {
-                let this = self.load()?;
-                if this.state.persistent.keys.card_authentication.is_some() {
-                    reply.expand(&[0x02, 0x02, 0x01, 0x00])?;
-                }
+            YubicoPivExtension::GetMetadata(reference) => {
+                self.load()?.get_metadata(reference, reply.lend())?;
             }
-            YubicoPivExtension::GetMetadata(_reference) => { /* TODO */ }
             YubicoPivExtension::ImportAsymmetricKey(algo, key) => {
                 self.load()?.import_asymmetric_key(algo, key, data, reply)?;
             }
@@ -888,65 +889,24 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
         ))
         .key;
 
-        match parsed_mechanism {
-            AsymmetricAlgorithms::P256 => {
-                let serialized_key = syscall!(self.trussed.serialize_key(
-                    parsed_mechanism.key_mechanism(),
-                    public_key,
-                    KeySerialization::Raw
-                ))
-                .serialized_key;
-                reply.expand(&[0x7F, 0x49])?;
-                let offset = reply.len();
-                reply.expand(&[0x86])?;
-                reply.append_len(serialized_key.len() + 1)?;
-                reply.expand(&[0x04])?;
-                reply.expand(&serialized_key)?;
-                reply.prepend_len(offset)?;
-            }
-            AsymmetricAlgorithms::P384 => {
-                let serialized_key = syscall!(self.trussed.serialize_key(
-                    parsed_mechanism.key_mechanism(),
-                    public_key,
-                    KeySerialization::Raw
-                ))
-                .serialized_key;
-                reply.expand(&[0x7F, 0x49])?;
-                let offset = reply.len();
-                reply.expand(&[0x86])?;
-                reply.append_len(serialized_key.len() + 1)?;
-                reply.expand(&[0x04])?;
-                reply.expand(&serialized_key)?;
-                reply.prepend_len(offset)?;
-            }
-            #[cfg(feature = "rsa")]
-            AsymmetricAlgorithms::Rsa2048
-            | AsymmetricAlgorithms::Rsa3072
-            | AsymmetricAlgorithms::Rsa4096 => {
-                use trussed_rsa_types::RsaPublicParts;
-                reply.expand(&[0x7F, 0x49])?;
-                let offset = reply.len();
-                let tmp = syscall!(self.trussed.serialize_key(
-                    parsed_mechanism.key_mechanism(),
-                    public_key,
-                    KeySerialization::RsaParts
-                ))
-                .serialized_key;
-                let serialized = RsaPublicParts::deserialize(&tmp).map_err(|_err| {
-                    error!("Failed to parse RSA parts: {:?}", _err);
-                    Status::UnspecifiedNonpersistentExecutionError
-                })?;
-                reply.expand(&[0x81])?;
-                reply.append_len(serialized.n.len())?;
-                reply.expand(serialized.n)?;
+        reply.expand(&[0x7F, 0x49])?;
+        let offset = reply.len();
+        serialize_public_key(
+            self.trussed,
+            parsed_mechanism,
+            public_key,
+            &mut reply.lend(),
+        )?;
+        reply.prepend_len(offset)?;
 
-                reply.expand(&[0x82])?;
-                reply.append_len(serialized.e.len())?;
-                reply.expand(serialized.e)?;
-
-                reply.prepend_len(offset)?;
-            }
-        };
+        store_public_key_metadata(
+            self.trussed,
+            reference,
+            parsed_mechanism,
+            public_key,
+            ORIGIN_GENERATED,
+            self.options.storage,
+        )?;
         syscall!(self.trussed.delete(public_key));
         if reference.is_encrypted() {
             syscall!(self.trussed.clear(secret_key));
@@ -1086,6 +1046,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                     KeySerialization::RsaParts
                 ))
                 .key;
+                self.store_imported_key_metadata(algo, key, id)?;
                 self.state.persistent.replace_asymmetric_key(
                     key,
                     algo,
@@ -1093,6 +1054,9 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                     self.trussed,
                     self.options.storage,
                 );
+                if key.is_encrypted() {
+                    syscall!(self.trussed.clear(id));
+                }
                 Ok(())
             }
             (AsymmetricAlgorithms::P256 | AsymmetricAlgorithms::P384, _) => {
@@ -1132,6 +1096,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                     Status::IncorrectDataParameter
                 })?
                 .key;
+                self.store_imported_key_metadata(algo, key, id)?;
                 self.state.persistent.replace_asymmetric_key(
                     key,
                     algo,
@@ -1139,12 +1104,191 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                     self.trussed,
                     self.options.storage,
                 );
+                if key.is_encrypted() {
+                    syscall!(self.trussed.clear(id));
+                }
                 Ok(())
             }
             #[allow(unreachable_patterns)]
             _ => Err(Status::FunctionNotSupported),
         }
     }
+
+    /// Derive and persist the public key of an imported private key for
+    /// GET METADATA. Must run before the key is sealed away by
+    /// `replace_asymmetric_key` since sealed keys cannot be loaded without the
+    /// PIN.
+    fn store_imported_key_metadata(
+        &mut self,
+        algo: AsymmetricAlgorithms,
+        key: AsymmetricKeyReference,
+        secret_key: KeyId,
+    ) -> Result {
+        let public_key = syscall!(self.trussed.derive_key(
+            algo.key_mechanism(),
+            secret_key,
+            None,
+            StorageAttributes::default().set_persistence(Location::Volatile)
+        ))
+        .key;
+        let res = store_public_key_metadata(
+            self.trussed,
+            key,
+            algo,
+            public_key,
+            ORIGIN_IMPORTED,
+            self.options.storage,
+        );
+        syscall!(self.trussed.delete(public_key));
+        res
+    }
+
+    pub fn get_metadata(&mut self, reference: KeyReference, mut reply: Reply<'_>) -> Result {
+        use state::KeyOrEncryptedWithAlg;
+
+        match reference {
+            KeyReference::ApplicationPin => {
+                reply.expand(&[0x01, 0x01, 0xFF])?;
+                reply.expand(&[
+                    0x06,
+                    0x02,
+                    state::Persistent::PIN_RETRIES_DEFAULT,
+                    self.state.persistent.remaining_pin_retries(self.trussed),
+                ])?;
+            }
+            KeyReference::PinUnblockingKey => {
+                reply.expand(&[0x01, 0x01, 0xFF])?;
+                reply.expand(&[
+                    0x06,
+                    0x02,
+                    state::Persistent::PUK_RETRIES_DEFAULT,
+                    self.state.persistent.remaining_puk_retries(self.trussed),
+                ])?;
+            }
+            KeyReference::PivCardApplicationAdministration => {
+                let alg = self.state.persistent.keys.administration.alg;
+                reply.expand(&[0x01, 0x01, Algorithms::from(alg) as u8])?;
+                // touch is not supported, and the management key never requires the PIN
+                reply.expand(&[0x02, 0x02, 0x01, 0x01])?;
+                reply.expand(&[
+                    0x05,
+                    0x01,
+                    self.state.persistent.keys.is_admin_default as u8,
+                ])?;
+            }
+            _ => {
+                let key: AsymmetricKeyReference = reference.try_into()?;
+                let alg = match self.state.persistent.keys.asymetric_for_reference(key) {
+                    KeyOrEncryptedWithAlg::Plain(Some(KeyWithAlg { alg, .. }))
+                    | KeyOrEncryptedWithAlg::Encrypted(Some(alg)) => alg,
+                    KeyOrEncryptedWithAlg::Plain(None) | KeyOrEncryptedWithAlg::Encrypted(None) => {
+                        return Err(Status::KeyReferenceNotFound)
+                    }
+                };
+                reply.expand(&[0x01, 0x01, Algorithms::from(alg) as u8])?;
+                // report the PIN policy the app actually enforces; touch is not supported
+                let pin_policy = match key.use_security_condition() {
+                    SecurityCondition::PinAlways => 0x03,
+                    SecurityCondition::Pin => 0x02,
+                    SecurityCondition::Always => 0x01,
+                };
+                reply.expand(&[0x02, 0x02, pin_policy, 0x01])?;
+                if let Ok(data) = try_syscall!(self
+                    .trussed
+                    .read_file(self.options.storage, key.public_key_path().into()))
+                {
+                    if let Some((&origin, public_key)) = data.data.split_first() {
+                        reply.expand(&[0x03, 0x01, origin])?;
+                        reply.expand(&[0x04])?;
+                        reply.append_len(public_key.len())?;
+                        reply.expand(public_key)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Key origin values reported in GET METADATA
+const ORIGIN_GENERATED: u8 = 0x01;
+const ORIGIN_IMPORTED: u8 = 0x02;
+
+/// Write the public key TLVs (`86` with the SEC1 point for ECC, `81`/`82` with
+/// modulus and exponent for RSA) as expected inside both the GENERATE
+/// ASYMMETRIC response (wrapped in `7F49`) and the GET METADATA `04` DO
+fn serialize_public_key<T: crate::Client>(
+    trussed: &mut T,
+    algo: AsymmetricAlgorithms,
+    public_key: KeyId,
+    reply: &mut Reply<'_>,
+) -> Result {
+    match algo {
+        AsymmetricAlgorithms::P256 | AsymmetricAlgorithms::P384 => {
+            let serialized_key = syscall!(trussed.serialize_key(
+                algo.key_mechanism(),
+                public_key,
+                KeySerialization::Raw
+            ))
+            .serialized_key;
+            reply.expand(&[0x86])?;
+            reply.append_len(serialized_key.len() + 1)?;
+            reply.expand(&[0x04])?;
+            reply.expand(&serialized_key)?;
+        }
+        #[cfg(feature = "rsa")]
+        AsymmetricAlgorithms::Rsa2048
+        | AsymmetricAlgorithms::Rsa3072
+        | AsymmetricAlgorithms::Rsa4096 => {
+            use trussed_rsa_types::RsaPublicParts;
+            let tmp = syscall!(trussed.serialize_key(
+                algo.key_mechanism(),
+                public_key,
+                KeySerialization::RsaParts
+            ))
+            .serialized_key;
+            let serialized = RsaPublicParts::deserialize(&tmp).map_err(|_err| {
+                error!("Failed to parse RSA parts: {:?}", _err);
+                Status::UnspecifiedNonpersistentExecutionError
+            })?;
+            reply.expand(&[0x81])?;
+            reply.append_len(serialized.n.len())?;
+            reply.expand(serialized.n)?;
+
+            reply.expand(&[0x82])?;
+            reply.append_len(serialized.e.len())?;
+            reply.expand(serialized.e)?;
+        }
+    }
+    Ok(())
+}
+
+/// Persist the origin and public key of an asymmetric key so that GET METADATA
+/// can answer without PIN verification (the private keys of all slots but 9E
+/// are sealed to the PIN and cannot be loaded when only the management key is
+/// authenticated)
+fn store_public_key_metadata<T: crate::Client>(
+    trussed: &mut T,
+    key: AsymmetricKeyReference,
+    algo: AsymmetricAlgorithms,
+    public_key: KeyId,
+    origin: u8,
+    storage: Location,
+) -> Result {
+    // Enough for the largest stored entry, an RSA 4096 public key: origin byte
+    // plus the 81/82 TLVs with a 512 byte modulus and a 3 byte exponent
+    let mut buf = heapless::Vec::<u8, 1024>::new();
+    let mut reply = Reply(&mut buf);
+    reply.expand(&[origin])?;
+    serialize_public_key(trussed, algo, public_key, &mut reply)?;
+    let data = Message::try_from(buf.as_slice()).map_err(|_| Status::NotEnoughMemory)?;
+    try_syscall!(trussed.write_file(storage, key.public_key_path().into(), data, None)).map_err(
+        |_err| {
+            error!("Failed to store public key metadata: {_err:?}");
+            Status::UnspecifiedNonpersistentExecutionError
+        },
+    )?;
+    Ok(())
 }
 
 /// Super trait with all trussed extensions required by opcard

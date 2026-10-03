@@ -11,7 +11,11 @@
 - Support importing ECC keys (P-256 and P-384) through the Yubico IMPORT ASYMMETRIC KEY
   extension, into any asymmetric key slot including the retired ones ([#16][])
 - Accept RSA key import into all asymmetric key slots instead of only 9A
+- Implement GET METADATA for all key references: algorithm, enforced PIN/touch policy,
+  origin and public key for the asymmetric slots (stored at import/generate time), retry
+  counters for PIN and PUK, and algorithm and default flag for the management key ([#15][])
 
+[#15]: https://github.com/trussed-dev/piv-authenticator/issues/15
 [#16]: https://github.com/trussed-dev/piv-authenticator/issues/16
 
 ## [v0.7.0][] (2026-08-17)
