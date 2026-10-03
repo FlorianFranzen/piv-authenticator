@@ -13,6 +13,8 @@
   they are exhausted, instead of a plain verification failure
 - Answer GET DATA for an empty key history object with NotFound, like a YubiKey
   without one
+- Let a malformed PIN of the right length burn a retry instead of rejecting it as a
+  format error, matching how clients exhaust the retry counter before RESET
 
 ## [v0.7.0][] (2026-08-17)
 
