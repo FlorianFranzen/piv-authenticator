@@ -750,6 +750,115 @@
         ]
     ),
     IoTest(
+        name: "Key policies",
+        uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
+        cmd_resp: [
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            // pin policy "once" relaxes the signature slot's default of "always": a
+            // session pin suffices. Touch "cached" asks once (granted automatically by
+            // the virtual platform) and reuses the touch within 15 seconds.
+            ImportEccKey(
+                key_reference: 0x9C,
+                scalar: "4444444444444444444444444444444444444444444444444444444444444444",
+                pin_policy: Some(0x02),
+                touch_policy: Some(0x03),
+            ),
+            CheckMetadata(
+                key_reference: 0x9C,
+                scalar: Some("4444444444444444444444444444444444444444444444444444444444444444"),
+                pin_policy: 0x02,
+                touch_policy: 0x03,
+                origin: 0x02,
+            ),
+            // pin policy "always" tightens the card authentication slot beyond its
+            // pin-free default: each use needs a pin entered just before
+            ImportEccKey(
+                key_reference: 0x9E,
+                scalar: "5555555555555555555555555555555555555555555555555555555555555555",
+                pin_policy: Some(0x03),
+            ),
+            // "once" still means a pin: no pin at all is not enough for the 9C key
+            SignEcc(
+                key_reference: 0x9C,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "4444444444444444444444444444444444444444444444444444444444444444",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "5555555555555555555555555555555555555555555555555555555555555555",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            VerifyApplicationPin(),
+            // 9E demands the pin *just* entered; 9C is content with the session pin,
+            // where its default policy would have demanded another fresh one
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "5555555555555555555555555555555555555555555555555555555555555555",
+            ),
+            SignEcc(
+                key_reference: 0x9C,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "4444444444444444444444444444444444444444444444444444444444444444",
+            ),
+            // generation takes the same policy DOs inside the AC template
+            IoData(
+                input: "00 47 009A 0B
+                                AC 09
+                                     80 01 11
+                                     AA 01 03
+                                     AB 01 01",
+                output: Len(70),
+            ),
+            CheckMetadata(
+                key_reference: 0x9A,
+                algo: Some(P256),
+                pin_policy: 0x03,
+                touch_policy: 0x01,
+                origin: 0x01, // generated
+            ),
+            // an invalid policy byte is rejected
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+                pin_policy: Some(0x07),
+                expected_status: IncorrectDataParameter,
+            ),
+            // pin policy "never" cannot be honoured on slots whose keys are sealed to
+            // the pin -- only the card authentication slot stores its key in plain
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+                pin_policy: Some(0x01),
+                expected_status: FunctionNotSupported,
+            ),
+            // the management key itself can demand touch (P2 0xFE); the prompt is
+            // granted automatically by the virtual platform on the next authentication
+            IoData(
+                input: "00 FF FF FE 1B 03 9B 18 010203040506070801020304050607080102030405060708",
+            ),
+            IoData(
+                input: "00 F7 00 9B 00",
+                output: Data("01 01 03 02 02 01 02 05 01 01"),
+            ),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+        ]
+    ),
+    IoTest(
         name: "Protected DOS",
         uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
         cmd_resp: [

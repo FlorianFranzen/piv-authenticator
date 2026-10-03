@@ -10,7 +10,7 @@ vpicc = "0.1.0"
 piv-authenticator = { path = ".." }
 log = "0.4"
 trussed-rsa-alloc = { version = "0.5", features = ["raw"] }
-trussed = { version = "0.2", default-features = false, features = ["aes256-cbc", "chacha8-poly1305", "crypto-client", "ed255", "filesystem-client", "p256", "p384", "shared-secret", "serde-extensions", "tdes", "x255", "virt"]  }
+trussed = { version = "0.2", default-features = false, features = ["aes256-cbc", "chacha8-poly1305", "crypto-client", "ed255", "filesystem-client", "management-client", "p256", "p384", "shared-secret", "serde-extensions", "tdes", "ui-client", "x255", "virt"]  }
 trussed-auth-backend = "0.2"
 trussed-core = "0.2"
 trussed-staging = { version = "0.5", features = ["chunked", "hpke", "wrap-key-to-file"], default-features = false }

@@ -40,13 +40,17 @@ use trussed_core::mechanisms::Tdes;
 use trussed_core::types::{
     KeyId, KeySerialization, Location, Mechanism, Message, PathBuf, StorageAttributes,
 };
-use trussed_core::{syscall, try_syscall, CryptoClient, FilesystemClient};
+use trussed_core::{
+    syscall, try_syscall, CryptoClient, FilesystemClient, ManagementClient, UiClient,
+};
 
 use constants::*;
 
 pub type Result<O = ()> = iso7816::Result<O>;
 use reply::Reply;
-use state::{AdministrationAlgorithm, CommandCache, KeyWithAlg, LoadedState, State, TouchPolicy};
+use state::{
+    AdministrationAlgorithm, CommandCache, KeyWithAlg, LoadedState, PinPolicy, State, TouchPolicy,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
@@ -256,7 +260,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
     pub fn yubico_set_administration_key(
         &mut self,
         data: &[u8],
-        _touch_policy: TouchPolicy,
+        touch_policy: TouchPolicy,
         _reply: Reply<'_>,
     ) -> Result {
         // cmd := apdu{
@@ -267,8 +271,6 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
         //         alg3DES, keyCardManagement, 24,
         //     }, key[:]...),
         // }
-
-        // TODO _touch_policy
 
         if !self
             .state
@@ -307,6 +309,10 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             return Err(Status::IncorrectDataParameter);
         }
 
+        // The P2 of the command decides whether future management authentications
+        // demand a touch; persisted by the save inside set_administration_key
+        self.state.persistent.keys.policies.admin_touch =
+            !matches!(touch_policy, TouchPolicy::Never);
         self.state
             .persistent
             .set_administration_key(key_data, alg, self.trussed);
@@ -447,10 +453,15 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
 
         // refine as we gain more capability
 
+        // Asymmetric slots take their condition from the stored (or default) pin policy;
+        // the management key and secure messaging have none
+        let security_condition = AsymmetricKeyReference::try_from(auth.key_reference)
+            .map(|key| self.state.persistent.keys.policies.security_condition(key))
+            .unwrap_or(SecurityCondition::Always);
         if !self
             .state
             .volatile
-            .security_valid(auth.key_reference.use_security_condition(), just_verified)
+            .security_valid(security_condition, just_verified)
         {
             warn!(
                 "Security condition not satisfied for key {:?}",
@@ -605,6 +616,10 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             return Err(Status::IncorrectDataParameter);
         }
 
+        if self.state.persistent.keys.policies.admin_touch {
+            self.state.check_touch(TouchPolicy::Always, self.trussed)?;
+        }
+
         self.state
             .volatile
             .app_security_status
@@ -683,6 +698,10 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             reply.expand(&challenge_response)?;
         }
         reply.prepend_len(offset)?;
+
+        if self.state.persistent.keys.policies.admin_touch {
+            self.state.check_touch(TouchPolicy::Always, self.trussed)?;
+        }
 
         self.state
             .volatile
@@ -874,6 +893,17 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             Status::IncorrectDataParameter
         })?;
 
+        // The Yubico policy DOs sit next to the mechanism inside the AC template;
+        // persisted by the save inside generate_asymmetric_key
+        let template = tlv::get_do(&[0xAC], data).ok_or(Status::IncorrectDataParameter)?;
+        let (pin_policy, touch_policy) = parse_policy_dos(template)?;
+        validate_pin_policy(reference, pin_policy)?;
+        self.state
+            .persistent
+            .keys
+            .policies
+            .set_policy(reference, pin_policy, touch_policy);
+
         let secret_key = self.state.persistent.generate_asymmetric_key(
             reference,
             parsed_mechanism,
@@ -1023,6 +1053,9 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             return Err(Status::SecurityStatusNotSatisfied);
         }
 
+        let (pin_policy, touch_policy) = parse_policy_dos(data)?;
+        validate_pin_policy(key, pin_policy)?;
+
         match (algo, key) {
             // TODO: document Here we do not exactly follow the Yubico extensions to fit better with our RSA backend requirements
             #[cfg(feature = "rsa")]
@@ -1047,6 +1080,11 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 ))
                 .key;
                 self.store_imported_key_metadata(algo, key, id)?;
+                self.state
+                    .persistent
+                    .keys
+                    .policies
+                    .set_policy(key, pin_policy, touch_policy);
                 self.state.persistent.replace_asymmetric_key(
                     key,
                     algo,
@@ -1087,6 +1125,11 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 })?
                 .key;
                 self.store_imported_key_metadata(algo, key, id)?;
+                self.state
+                    .persistent
+                    .keys
+                    .policies
+                    .set_policy(key, pin_policy, touch_policy);
                 self.state.persistent.replace_asymmetric_key(
                     key,
                     algo,
@@ -1160,8 +1203,12 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             KeyReference::PivCardApplicationAdministration => {
                 let alg = self.state.persistent.keys.administration.alg;
                 reply.expand(&[0x01, 0x01, Algorithms::from(alg) as u8])?;
-                // touch is not supported, and the management key never requires the PIN
-                reply.expand(&[0x02, 0x02, 0x01, 0x01])?;
+                let touch = if self.state.persistent.keys.policies.admin_touch {
+                    TouchPolicy::Always
+                } else {
+                    TouchPolicy::Never
+                };
+                reply.expand(&[0x02, 0x02, PinPolicy::Never.byte(), touch.byte()])?;
                 reply.expand(&[
                     0x05,
                     0x01,
@@ -1187,13 +1234,8 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                     return Err(Status::KeyReferenceNotFound);
                 };
                 reply.expand(&[0x01, 0x01, Algorithms::from(alg) as u8])?;
-                // report the PIN policy the app actually enforces; touch is not supported
-                let pin_policy = match key.use_security_condition() {
-                    SecurityCondition::PinAlways => 0x03,
-                    SecurityCondition::Pin => 0x02,
-                    SecurityCondition::Always => 0x01,
-                };
-                reply.expand(&[0x02, 0x02, pin_policy, 0x01])?;
+                let (pin, touch) = self.state.persistent.keys.policies.policy(key);
+                reply.expand(&[0x02, 0x02, pin.byte(), touch.byte()])?;
                 reply.expand(&[0x03, 0x01, origin])?;
                 reply.expand(&[0x04])?;
                 reply.append_len(public_key.len())?;
@@ -1207,6 +1249,33 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
 /// Key origin values reported in GET METADATA
 const ORIGIN_GENERATED: u8 = 0x01;
 const ORIGIN_IMPORTED: u8 = 0x02;
+
+/// Parse the optional Yubico pin (`0xAA`) and touch (`0xAB`) policy DOs that clients
+/// append to key import and generation requests
+fn parse_policy_dos(data: &[u8]) -> Result<(Option<PinPolicy>, Option<TouchPolicy>)> {
+    let pin = match tlv::get_do(&[0xAA], data) {
+        None => None,
+        Some(&[byte]) => Some(PinPolicy::try_from(byte)?),
+        Some(_) => return Err(Status::IncorrectDataParameter),
+    };
+    let touch = match tlv::get_do(&[0xAB], data) {
+        None => None,
+        Some(&[byte]) => Some(TouchPolicy::try_from(byte)?),
+        Some(_) => return Err(Status::IncorrectDataParameter),
+    };
+    Ok((pin, touch))
+}
+
+/// Every slot but 9E stores its key sealed to the PIN, so a key that must work without
+/// any PIN cannot live there -- unlike on a YubiKey, where pin policy Never is valid on
+/// all slots because keys are not encrypted at rest
+fn validate_pin_policy(key: AsymmetricKeyReference, pin: Option<PinPolicy>) -> Result {
+    if pin == Some(PinPolicy::Never) && key.is_encrypted() {
+        warn!("Pin policy Never is not supported on slots with pin-encrypted storage");
+        return Err(Status::FunctionNotSupported);
+    }
+    Ok(())
+}
 
 /// Write the public key TLVs (`86` with the SEC1 point for ECC, `81`/`82` with
 /// modulus and exponent for RSA) as expected inside both the GENERATE
@@ -1294,6 +1363,8 @@ pub trait Client:
     + Tdes
     + WrapKeyToFileClient
     + HpkeClient
+    + UiClient
+    + ManagementClient
 {
 }
 impl<
@@ -1303,7 +1374,9 @@ impl<
             + ChunkedClient
             + Tdes
             + WrapKeyToFileClient
-            + HpkeClient,
+            + HpkeClient
+            + UiClient
+            + ManagementClient,
     > Client for C
 {
 }

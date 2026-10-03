@@ -421,6 +421,12 @@ enum IoCmd {
         /// Sent as given, to provoke a mismatch; derived from the scalar otherwise
         #[serde(default)]
         algo: Option<Algorithm>,
+        /// Yubico pin policy DO (0xAA) appended to the import
+        #[serde(default)]
+        pin_policy: Option<u8>,
+        /// Yubico touch policy DO (0xAB) appended to the import
+        #[serde(default)]
+        touch_policy: Option<u8>,
         #[serde(default)]
         expected_status: Status,
     },
@@ -552,8 +558,18 @@ impl IoCmd {
                 key_reference,
                 scalar,
                 algo,
+                pin_policy,
+                touch_policy,
                 expected_status,
-            } => Self::run_import_ecc_key(*key_reference, scalar, *algo, *expected_status, card),
+            } => Self::run_import_ecc_key(
+                *key_reference,
+                scalar,
+                *algo,
+                *pin_policy,
+                *touch_policy,
+                *expected_status,
+                card,
+            ),
             Self::CheckMetadata {
                 key_reference,
                 scalar,
@@ -646,12 +662,20 @@ impl IoCmd {
         key_reference: u8,
         scalar: &str,
         algo: Option<Algorithm>,
+        pin_policy: Option<u8>,
+        touch_policy: Option<u8>,
         expected_status: Status,
         card: &mut setup::Piv,
     ) {
         let scalar = parse_hex(scalar);
         let algo = algo.unwrap_or_else(|| Curve::of_scalar(&scalar).algorithm());
-        let data = tlv(&[0x06], &scalar);
+        let mut data = tlv(&[0x06], &scalar);
+        if let Some(pin_policy) = pin_policy {
+            data.extend_from_slice(&tlv(&[0xAA], &[pin_policy]));
+        }
+        if let Some(touch_policy) = touch_policy {
+            data.extend_from_slice(&tlv(&[0xAB], &[touch_policy]));
+        }
         Self::run_bytes(
             &build_command(0x00, 0xFE, algo as u8, key_reference, &data, 0),
             &MATCH_EMPTY,
