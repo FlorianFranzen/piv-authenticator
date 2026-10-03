@@ -90,7 +90,15 @@ impl<'l> TryFrom<&'l [u8]> for Select<'l> {
     /// We allow ourselves the option of answering to more than just the official PIV AID.
     /// For instance, to offer additional functionality, under our own RID.
     fn try_from(data: &'l [u8]) -> Result<Self, Self::Error> {
-        if crate::constants::PIV_AID.matches(data) {
+        // ISO 7816-4 partial selection: any prefix of the AID down to the
+        // 5 byte RID selects the application (the Yubico ecosystem selects
+        // with just the RID), as does the full AID with trailing bytes.
+        // `Aid::matches` only compares the truncated prefix, so check here
+        // that the candidate agrees with the AID over their common length
+        // and does not merely share the RID, like a different PIX would.
+        let full_aid = crate::constants::PIV_AID.as_bytes();
+        let shared = full_aid.len().min(data.len());
+        if data.len() >= crate::constants::PIV_RID_LENGTH && data[..shared] == full_aid[..shared] {
             Ok(Self { aid: data })
         } else {
             Err(Status::NotFound)

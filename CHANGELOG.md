@@ -4,7 +4,8 @@
 
 [Unreleased]: https://github.com/trussed-dev/piv-authenticator/compare/v0.7.0...HEAD
 
--
+- Truncate the application identifier at the 5 byte RID so SELECT with a partial
+  AID is answered, both in the app and in the apdu-dispatch routing
 
 ## [v0.7.0][] (2026-08-17)
 

@@ -23,8 +23,14 @@ pub const DERIVED_PIV_PIX: [u8; 6] = hex!("0000 2000 0100");
 pub const PIV_TRUNCATED_AID: [u8; 9] = hex!("A000000308 00001000");
 
 // pub const PIV_AID: &[u8] = &hex!("A000000308 00001000 0100");
+/// Length of the RID, the shortest AID prefix that still selects the application
+pub const PIV_RID_LENGTH: usize = 5;
+// Truncatable down to the 5 byte RID: Yubico ecosystem clients select with just
+// that, and the apdu-dispatch layer routes SELECT through `Aid::matches` before
+// the app's own parsing ever runs. `Select::try_from` then rejects candidates
+// that share the RID without being a prefix of this AID.
 pub const PIV_AID: iso7816::Aid =
-    iso7816::Aid::new_truncatable(&hex!("A000000308 00001000 0100"), 9);
+    iso7816::Aid::new_truncatable(&hex!("A000000308 00001000 0100"), PIV_RID_LENGTH);
 
 pub const DERIVED_PIV_AID: [u8; 11] = hex!("A000000308 00002000 0100");
 
