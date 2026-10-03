@@ -421,6 +421,11 @@ impl From<PinType> for trussed_auth::PinId {
 #[derive(Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Persistent {
     pub keys: Keys,
+    // Reported by GET METADATA; false for states written before the flags existed
+    #[serde(default)]
+    pub pin_is_default: bool,
+    #[serde(default)]
+    pub puk_is_default: bool,
     // Ideally, we'd dogfood a "Monotonic Counter" from `trussed`.
     timestamp: u32,
     #[serde(skip, default = "volatile")]
@@ -672,6 +677,8 @@ impl Persistent {
         self.reset_pin(*new_pin, pin_key, client)?;
         syscall!(client.delete(pin_key));
         syscall!(client.delete(puk_key));
+        self.pin_is_default = new_pin.0 == Self::DEFAULT_PIN.0;
+        self.save(client);
         Ok(true)
     }
 
@@ -697,9 +704,14 @@ impl Persistent {
     ) -> bool {
         let old_pin = Bytes::from(&old_value.0);
         let new_pin = Bytes::from(&new_value.0);
-        try_syscall!(client.change_pin(PinType::UserPin, old_pin, new_pin))
+        let changed = try_syscall!(client.change_pin(PinType::UserPin, old_pin, new_pin))
             .map(|r| r.success)
-            .unwrap_or(false)
+            .unwrap_or(false);
+        if changed {
+            self.pin_is_default = new_value.0 == Self::DEFAULT_PIN.0;
+            self.save(client);
+        }
+        changed
     }
 
     pub fn change_puk<T: crate::Client>(
@@ -710,9 +722,14 @@ impl Persistent {
     ) -> bool {
         let old_puk = Bytes::from(&old_value.0);
         let new_puk = Bytes::from(&new_value.0);
-        try_syscall!(client.change_pin(PinType::Puk, old_puk, new_puk))
+        let changed = try_syscall!(client.change_pin(PinType::Puk, old_puk, new_puk))
             .map(|r| r.success)
-            .unwrap_or(false)
+            .unwrap_or(false);
+        if changed {
+            self.puk_is_default = new_value.0 == Self::DEFAULT_PUK.0;
+            self.save(client);
+        }
+        changed
     }
 
     fn reset_pin<T: crate::Client>(
@@ -996,6 +1013,8 @@ impl Persistent {
 
         let mut state = Self {
             keys,
+            pin_is_default: true,
+            puk_is_default: true,
             timestamp: 0,
             storage: options.storage,
         };
