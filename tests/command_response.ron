@@ -484,7 +484,121 @@
                         82 820200
                         5b89c77459c1d0d8c6c0a0c0628cde7d76aca80340fce8ec27dc80adecca8e16968c921972d95071a8f1b10c260b81242c119bd0fbe091675952b26d0877fe4e82975aae901c4b8f26ebe965df40abfb9fa1782b4dfde1c0dd6e278d0575695d5f2523af5de01ac2f26abcbac0e2956a02799f7905cba2f223f2e609b079b841b428e90e610e24cd284d039413977d48ae7ca522a2070f7e0dbdeac0b812b4d46392d4085dbf527a7560231199627d84b8569ea1b54a19f4144914a20e2ce32d6915c1db7bcc5559deed24f6bc6683b05afedd384a34a7b1ae51af2b391e8d6f7d5075b5a0bd4b0e13336d834956288341c30808d150b799a8f9f5e2a2c50d9569ebd6f3e06b411931e7286699b4cd409598d0ead0a7a77486143996e92cdb7cdfa9c3777501e25940fe6a280080f377a2552a552f8e009cc4bc1d24cf2c3941a01c09d07a1117bae9637ed749fc0a4d98dd59451061d7c4af323265324a770adf92c63e0a0bc67ef1b326534d047a6683c0491c13f983e320fc2f398f4215ab01a9ac024b31aabf488ace1750d8eb0f6f411c5a8a62b2468ba7ad0c11f1ff108a7bbb8fc5a655a7dffd977eb0377fb6ffc9a2bf6e850e11d2762b6e72f80b44e03dd208071f2f7673566ba3853d3b04759c59b53a8c4138862f55702d25014f4bb2eb1cf2b2d047605f6b4a3f09b55212562bbb9cd35d5c3b3b9a543de3189f
                 "),
+            ),
+            // the same key imported into a retired slot produces the same signature
+            ImportRsaKey(
+                p: "c4e56357f7910f2bcf5095dfbda9485adcd416c7dd5c794be72c4667397f05c840b0cd89f04c4ef12f7bcbf7bfad8c9ef96d695fa6fe4322b7fec913cf3d0976260c22d86f11c01af214d518bdb1c9260bf55e92c838fe60712fac04d0c2beae68a063b81cdc3f3afed2df32146a6d04a63ddb7885e4fe1880f710bae2ca5711e5883834559a331a1e5a8fad9a397f2fa064f36db9aa522d3816aa378c91940473cc1f347b6e0ae21182ba2939fee1f9824678b72a15cc35ebf27899b42494b09d26d0d5efa6fd4ad380b88c64c0687287d902c9a0546f1d06416992853cdcbb9e080dc0989b72514513da9f6dd332fdc46347f4a70b558cc6c6431e308dbfb7",
+                q: "cb100ef4dd07f17f4ceae3017aeb5cd6a63ef8bd048d181ff8e02dc45857ea1954513340c90db5fe67fcbac1d5dbe681f3ceb26bbc72e4720854ef17e8a340e270c3217c9f61f0734ec3600e3f9b24a648d7b8547117d16107ff1d1413ccc8e858cadbda8264b84fd7bd1fde14d285248d608083e2b40b328c58cfb37f37b6e9f4c416c972c3c6abee6bcccb34975fa5b335c7ba98b846f954e55cfcaba9f3dd9ab84e2b31c7e54967480bfced52c14d5a3a56235ee53f5c1aa994ee5e314bb2bb75ae3266e7e42cc6eb2229e911d95d483659371af5ba001381f278d063e082c99bf238daec1dcd8af07641c6e9bd8d8ea04dfe68d9c1833c9701d820a5cdd3",
+                e: "010001",
+                key_reference: 0x82,
+            ),
+            Sign(
+                algo: 0x07,
+                key_reference: 0x82,
+                data: "0111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+                output: Data("
+                    7c 82 0204
+                        82 820200
+                        5b89c77459c1d0d8c6c0a0c0628cde7d76aca80340fce8ec27dc80adecca8e16968c921972d95071a8f1b10c260b81242c119bd0fbe091675952b26d0877fe4e82975aae901c4b8f26ebe965df40abfb9fa1782b4dfde1c0dd6e278d0575695d5f2523af5de01ac2f26abcbac0e2956a02799f7905cba2f223f2e609b079b841b428e90e610e24cd284d039413977d48ae7ca522a2070f7e0dbdeac0b812b4d46392d4085dbf527a7560231199627d84b8569ea1b54a19f4144914a20e2ce32d6915c1db7bcc5559deed24f6bc6683b05afedd384a34a7b1ae51af2b391e8d6f7d5075b5a0bd4b0e13336d834956288341c30808d150b799a8f9f5e2a2c50d9569ebd6f3e06b411931e7286699b4cd409598d0ead0a7a77486143996e92cdb7cdfa9c3777501e25940fe6a280080f377a2552a552f8e009cc4bc1d24cf2c3941a01c09d07a1117bae9637ed749fc0a4d98dd59451061d7c4af323265324a770adf92c63e0a0bc67ef1b326534d047a6683c0491c13f983e320fc2f398f4215ab01a9ac024b31aabf488ace1750d8eb0f6f411c5a8a62b2468ba7ad0c11f1ff108a7bbb8fc5a655a7dffd977eb0377fb6ffc9a2bf6e850e11d2762b6e72f80b44e03dd208071f2f7673566ba3853d3b04759c59b53a8c4138862f55702d25014f4bb2eb1cf2b2d047605f6b4a3f09b55212562bbb9cd35d5c3b3b9a543de3189f
+                "),
             )
+        ]
+    ),
+    IoTest(
+        name: "ECC key import",
+        uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
+        cmd_resp: [
+            // import requires management key authentication
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            // P-256 into the four standard-ish slots and a retired one
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+            ),
+            ImportEccKey(
+                key_reference: 0x9C,
+                scalar: "1111111111111111111111111111111111111111111111111111111111111111",
+            ),
+            ImportEccKey(
+                key_reference: 0x9E,
+                scalar: "2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+            ImportEccKey(
+                key_reference: 0x82,
+                scalar: "3333333333333333333333333333333333333333333333333333333333333333",
+            ),
+            // P-384 into another retired slot
+            ImportEccKey(
+                key_reference: 0x83,
+                scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+            ),
+            // a truncated scalar is rejected
+            ImportEccKey(
+                key_reference: 0x9A,
+                algo: Some(0x11),
+                scalar: "0102030405060708",
+                expected_status: IncorrectDataParameter,
+            ),
+            // the zero scalar is not a valid private key
+            ImportEccKey(
+                key_reference: 0x9A,
+                algo: Some(0x11),
+                scalar: "0000000000000000000000000000000000000000000000000000000000000000",
+                expected_status: IncorrectDataParameter,
+            ),
+            // 9E (card authentication) signs without a PIN
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+            // 9A refuses without a verified PIN
+            SignEcc(
+                key_reference: 0x9A,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            VerifyApplicationPin(),
+            SignEcc(
+                key_reference: 0x9A,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+            ),
+            SignEcc(
+                key_reference: 0x82,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "3333333333333333333333333333333333333333333333333333333333333333",
+            ),
+            SignEcc(
+                key_reference: 0x83,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFFF0",
+                scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+            ),
+            // 9C (digital signature) requires the PIN immediately before each use
+            SignEcc(
+                key_reference: 0x9C,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "1111111111111111111111111111111111111111111111111111111111111111",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            VerifyApplicationPin(),
+            SignEcc(
+                key_reference: 0x9C,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "1111111111111111111111111111111111111111111111111111111111111111",
+            ),
         ]
     ),
     IoTest(
