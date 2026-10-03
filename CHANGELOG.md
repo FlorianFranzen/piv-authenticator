@@ -9,6 +9,8 @@
 - Fix the inverted parsing of the touch requirement in SET MANAGEMENT KEY's P2
   (0xFF means no touch, 0xFE means touch required)
 - Reset the security state when the application is selected, like a YubiKey does
+- Report the remaining retries from failed CHANGE REFERENCE DATA, and blocked once
+  they are exhausted, instead of a plain verification failure
 
 ## [v0.7.0][] (2026-08-17)
 
