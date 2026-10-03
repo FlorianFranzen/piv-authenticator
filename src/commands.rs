@@ -166,10 +166,14 @@ impl TryFrom<VerifyArguments<'_>> for Verify {
         }
         Ok(match (logout.0, data.len()) {
             (false, 0) => Verify::Status(key_reference),
-            (false, 8) => Verify::Login(VerifyLogin::PivPin(
-                data.try_into()
-                    .map_err(|_| Status::IncorrectDataParameter)?,
-            )),
+            // A malformed PIN of the right length is still handed to the
+            // verification: it can never match the stored PIN (which was
+            // validated when set), so it burns a retry exactly like a wrong
+            // PIN does on a YubiKey. Clients (yubikey.rs, ykman) exhaust the
+            // retry counter before RESET by verifying with eight 0xFF bytes.
+            (false, 8) => Verify::Login(VerifyLogin::PivPin(Pin(data
+                .try_into()
+                .map_err(|_| Status::IncorrectDataParameter)?))),
             (false, _) => return Err(Status::IncorrectDataParameter),
             (true, 0) => Verify::Logout(key_reference),
             (true, _) => return Err(Status::IncorrectDataParameter),
