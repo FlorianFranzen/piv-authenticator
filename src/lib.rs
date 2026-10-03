@@ -244,13 +244,19 @@ where
                     .yubico_set_administration_key(data, touch_policy, reply)?;
             }
 
+            YubicoPivExtension::SetPinRetries {
+                pin_retries,
+                puk_retries,
+            } => {
+                self.load()?.set_pin_retries(pin_retries, puk_retries)?;
+            }
+
             YubicoPivExtension::GetMetadata(reference) => {
                 self.load()?.get_metadata(reference, reply.lend())?;
             }
             YubicoPivExtension::ImportAsymmetricKey(algo, key) => {
                 self.load()?.import_asymmetric_key(algo, key, data, reply)?;
             }
-            _ => return Err(Status::FunctionNotSupported),
         }
         Ok(())
     }
@@ -370,6 +376,47 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             ChangeReference::ChangePin { old_pin, new_pin } => self.change_pin(old_pin, new_pin),
             ChangeReference::ChangePuk { old_puk, new_puk } => self.change_puk(old_puk, new_puk),
         }
+    }
+
+    /// Yubico SET PIN RETRIES (INS 0xFA). Requires both management authentication and a
+    /// verified PIN, and -- like a YubiKey -- resets PIN and PUK to their defaults with the
+    /// new retry counts while leaving the imported keys untouched.
+    pub fn set_pin_retries(&mut self, pin_retries: u8, puk_retries: u8) -> Result {
+        if !self
+            .state
+            .volatile
+            .app_security_status
+            .administrator_verified
+        {
+            return Err(Status::SecurityStatusNotSatisfied);
+        }
+        if !self.state.volatile.pin_verified() {
+            return Err(Status::SecurityStatusNotSatisfied);
+        }
+        // A zero retry count would brick the PIN or PUK immediately
+        if pin_retries == 0 || puk_retries == 0 {
+            return Err(Status::IncorrectP1OrP2Parameter);
+        }
+
+        // The user private key wraps the encrypted slots; obtain it (PIN was verified) so it
+        // can be re-wrapped under the freshly reset PIN rather than orphaned.
+        let user_key = self
+            .state
+            .volatile
+            .user_key(self.options.storage, self.trussed)?
+            .ok_or(Status::SecurityStatusNotSatisfied)?;
+
+        self.state.persistent.set_pin_retries(
+            self.trussed,
+            self.options,
+            user_key,
+            pin_retries,
+            puk_retries,
+        )?;
+
+        // PIN and PUK are back to their defaults now, so this session is no longer verified
+        self.state.volatile.clear_pin_verified(self.trussed);
+        Ok(())
     }
 
     pub fn change_pin(&mut self, old_pin: commands::Pin, new_pin: commands::Pin) -> Result {
@@ -1186,7 +1233,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 reply.expand(&[
                     0x06,
                     0x02,
-                    state::Persistent::PIN_RETRIES_DEFAULT,
+                    self.state.persistent.pin_total_retries(),
                     self.state.persistent.remaining_pin_retries(self.trussed),
                 ])?;
             }
@@ -1196,7 +1243,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 reply.expand(&[
                     0x06,
                     0x02,
-                    state::Persistent::PUK_RETRIES_DEFAULT,
+                    self.state.persistent.puk_total_retries(),
                     self.state.persistent.remaining_puk_retries(self.trussed),
                 ])?;
             }

@@ -15,6 +15,8 @@
   origin and public key for the asymmetric slots (stored at import/generate time), retry
   counters and default flags for PIN and PUK, and algorithm and default flag for the
   management key; an empty asymmetric slot answers `6A88` ([#15][])
+- Implement the Yubico SET PIN RETRIES extension: resets PIN and PUK to their defaults
+  with the new retry counts while keeping the provisioned keys
 - Store and enforce the per-slot pin and touch policies requested through the Yubico
   DOs at key import and generation, and the touch requirement on the management key
   (P2 of SET MANAGEMENT KEY). Touch prompts go through trussed's user-presence
