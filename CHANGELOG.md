@@ -4,7 +4,8 @@
 
 [Unreleased]: https://github.com/trussed-dev/piv-authenticator/compare/v0.7.0...HEAD
 
--
+- Add the Yubico msroots data objects (5FFF11 to 5FFF15), from which Windows reads its
+  trusted root certificates
 
 ## [v0.7.0][] (2026-08-17)
 
