@@ -136,6 +136,18 @@ where
         use piv_types::Algorithms::*;
         info!("selecting PIV maybe");
 
+        // Selecting the application resets the security state like it does on
+        // a YubiKey: clients rely on this -- yubikey.rs re-selects the applet
+        // specifically to drop PIN verification before querying the retry
+        // counter, and would otherwise mistake a verified session for one with
+        // no retries left
+        self.state.volatile.clear_pin_verified(&mut self.trussed);
+        self.state.volatile.app_security_status.pin_just_verified = false;
+        self.state
+            .volatile
+            .app_security_status
+            .administrator_verified = false;
+
         let application_property_template = piv_types::ApplicationPropertyTemplate::default()
             .with_application_label(self.options.label)
             .with_application_url(self.options.url)
