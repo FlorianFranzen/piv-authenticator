@@ -137,7 +137,16 @@ impl<const N: usize> ResponseBuffer<N> {
                 return (&[], status);
             }
         }
-        self.response(command.expected())
+        // A real YubiKey treats an absent Le byte -- which is what ykman,
+        // yubico-piv-tool and yubikey.rs send -- as "up to 256 bytes", not as
+        // "no response data": short replies come back whole and longer ones in
+        // 256 byte chunks over GET RESPONSE (whose Le is also absent). Their
+        // client buffers are sized accordingly, so never send more than that.
+        let expected = match command.expected() {
+            0 => 256,
+            expected => expected,
+        };
+        self.response(expected)
     }
 
     fn response(&mut self, n: usize) -> (&[u8], Status) {
