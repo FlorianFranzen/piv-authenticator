@@ -15,9 +15,17 @@
 - Implement GET METADATA for all key references: algorithm, enforced PIN/touch policy,
   origin and public key for the asymmetric slots (stored at import/generate time), retry
   counters for PIN and PUK, and algorithm and default flag for the management key ([#15][])
+- Store and enforce the per-slot pin and touch policies requested through the Yubico
+  DOs at key import and generation, and the touch requirement on the management key
+  (P2 of SET MANAGEMENT KEY). Touch prompts go through trussed's user-presence
+  request; "cached" reuses a confirmed touch for 15 seconds. Pin policy "never" is
+  rejected on every slot but 9E, whose key alone is not stored sealed to the PIN
+  ([#31][], [#32][])
 
 [#15]: https://github.com/trussed-dev/piv-authenticator/issues/15
 [#16]: https://github.com/trussed-dev/piv-authenticator/issues/16
+[#31]: https://github.com/trussed-dev/piv-authenticator/issues/31
+[#32]: https://github.com/trussed-dev/piv-authenticator/issues/32
 
 ## [v0.7.0][] (2026-08-17)
 
