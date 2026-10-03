@@ -892,4 +892,100 @@
             ),
         ],
     ),
+    IoTest(
+        name: "Set pin retries",
+        cmd_resp: [
+            // needs management authentication and a verified pin
+            IoData(
+                input: "00 FA 05 06 00",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            IoData(
+                input: "00 FA 05 06 00",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            VerifyApplicationPin(),
+            // a key provisioned before the reset must survive it
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+            ),
+            // changed credentials go back to the defaults as well
+            ChangePin(
+                new: "313131313131FFFF",
+            ),
+            ChangePuk(
+                new: "0102030405060708",
+            ),
+            // zero counts would brick a pin
+            IoData(
+                input: "00 FA 00 06 00",
+                expected_status: IncorrectP1OrP2Parameter,
+            ),
+            // set pin to 5 tries, puk to 6
+            IoData(
+                input: "00 FA 05 06 00",
+            ),
+            // pin and puk are reset to their defaults with the new counts; a wrong pin
+            // now reports the fresh count
+            VerifyApplicationPin(pin: "3131313131313131", expected_status: RemainingRetries(4)),
+            VerifyApplicationPin(),
+            // metadata reflects the new counts and the restored defaults
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 05 01 01 06 02 05 05"),
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 05 01 01 06 02 06 06"),
+            ),
+            // the key imported before the reset still signs under the new pin
+            SignEcc(
+                key_reference: 0x9A,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+            ),
+        ]
+    ),
+    IoTest(
+        name: "Protected DOS",
+        uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
+        cmd_resp: [
+            GetData(
+                input: "5C 03 5FC108",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            GetData(
+                input: "5C 03 5FC108",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            VerifyApplicationPin(),
+            GetData(
+                input: "5C 03 5FC108",
+                output: All(),
+                expected_status: NotFound,
+            ),
+            PutData(
+                input: "5C 03 5FC108 53 10 000102030405060708090A0B0C0D0E0F",
+            ),
+            GetData(
+                input: "5C 03 5FC108",
+                output: Data("53 10 000102030405060708090A0B0C0D0E0F"),
+            ),
+        ],
+    ),
 ]
