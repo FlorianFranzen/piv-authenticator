@@ -425,6 +425,20 @@ pub struct Persistent {
     timestamp: u32,
     #[serde(skip, default = "volatile")]
     storage: Location,
+    // Configured via the Yubico SET PIN RETRIES extension; the totals reported in
+    // GET METADATA and restored when a pin is reset through the puk
+    #[serde(default = "default_pin_retries")]
+    pin_total_retries: u8,
+    #[serde(default = "default_puk_retries")]
+    puk_total_retries: u8,
+}
+
+fn default_pin_retries() -> u8 {
+    Persistent::PIN_RETRIES_DEFAULT
+}
+
+fn default_puk_retries() -> u8 {
+    Persistent::PUK_RETRIES_DEFAULT
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -489,6 +503,17 @@ impl Volatile {
     pub fn clear_pin_verified(&mut self, client: &mut impl crate::Client) {
         self.app_security_status.pin_verified.clear(client);
         self.app_security_status.pin_just_verified = false;
+    }
+
+    /// The unwrapped user private key for the verified PIN, or `None` if no PIN is verified.
+    pub fn user_key(
+        &mut self,
+        storage: Location,
+        client: &mut impl crate::Client,
+    ) -> Result<Option<KeyId>, Status> {
+        self.app_security_status
+            .pin_verified
+            .get_user_key(storage, client)
     }
 
     pub fn security_valid(&self, condition: SecurityCondition, just_verified: bool) -> bool {
@@ -725,7 +750,7 @@ impl Persistent {
         try_syscall!(client.set_pin_with_key(
             PinType::UserPin,
             new_pin,
-            Some(Self::PIN_RETRIES_DEFAULT),
+            Some(self.pin_total_retries),
             old_key,
         ))
         .map_err(|_err| {
@@ -741,7 +766,7 @@ impl Persistent {
         client: &mut T,
     ) -> Result<(), Status> {
         let new_puk = Bytes::from(&new_puk.0);
-        try_syscall!(client.set_pin(PinType::Puk, new_puk, Some(Self::PUK_RETRIES_DEFAULT), true))
+        try_syscall!(client.set_pin(PinType::Puk, new_puk, Some(self.puk_total_retries), true))
             .map_err(|_err| {
                 error!("Failed to set puk");
                 Status::UnspecifiedPersistentExecutionError
@@ -860,11 +885,43 @@ impl Persistent {
     }
 
     fn init_pins<T: crate::Client>(client: &mut T, options: &crate::Options) -> Result<(), Status> {
+        // The user private key (X25519) is what actually decrypts the encrypted slots; the
+        // PIN key wraps it, and the PUK backup wraps the PIN key. Generate it once here and
+        // let the shared helper set the PINs and lay down all three wrappings.
+        let user_asymetric_key = syscall!(client.generate_key(
+            Mechanism::X255,
+            StorageAttributes::new().set_persistence(Location::Volatile)
+        ))
+        .key;
+
+        Self::wrap_user_key(
+            client,
+            options,
+            user_asymetric_key,
+            Self::PIN_RETRIES_DEFAULT,
+            Self::PUK_RETRIES_DEFAULT,
+        )?;
+
+        syscall!(client.clear(user_asymetric_key));
+        Ok(())
+    }
+
+    /// Set PIN and PUK to their defaults with the given retry counts and (re)wrap the user
+    /// private key under them. Shared by initialization and by SET PIN RETRIES, which on a
+    /// YubiKey likewise resets PIN and PUK while leaving the on-card keys intact -- so the
+    /// caller passes the *existing* user private key to preserve slot access.
+    fn wrap_user_key<T: crate::Client>(
+        client: &mut T,
+        options: &crate::Options,
+        user_asymetric_key: KeyId,
+        pin_retries: u8,
+        puk_retries: u8,
+    ) -> Result<(), Status> {
         let default_pin = Bytes::from(&Self::DEFAULT_PIN.0);
         try_syscall!(client.set_pin(
             PinType::UserPin,
             default_pin.clone(),
-            Some(Self::PIN_RETRIES_DEFAULT),
+            Some(pin_retries),
             true
         ))
         .map_err(|_err| {
@@ -872,16 +929,11 @@ impl Persistent {
             Status::UnspecifiedPersistentExecutionError
         })?;
         let default_puk = Bytes::from(&Self::DEFAULT_PUK.0);
-        try_syscall!(client.set_pin(
-            PinType::Puk,
-            default_puk.clone(),
-            Some(Self::PUK_RETRIES_DEFAULT),
-            true
-        ))
-        .map_err(|_err| {
-            error!("Failed to set puk");
-            Status::UnspecifiedPersistentExecutionError
-        })?;
+        try_syscall!(client.set_pin(PinType::Puk, default_puk.clone(), Some(puk_retries), true))
+            .map_err(|_err| {
+                error!("Failed to set puk");
+                Status::UnspecifiedPersistentExecutionError
+            })?;
 
         let user_key = syscall!(client.get_pin_key(PinType::UserPin, default_pin))
             .result
@@ -901,12 +953,6 @@ impl Persistent {
         ));
 
         syscall!(client.delete(puk_key));
-
-        let user_asymetric_key = syscall!(client.generate_key(
-            Mechanism::X255,
-            StorageAttributes::new().set_persistence(Location::Volatile)
-        ))
-        .key;
 
         syscall!(client.wrap_key_to_file(
             Mechanism::Chacha8Poly1305,
@@ -938,9 +984,42 @@ impl Persistent {
         ));
 
         syscall!(client.delete(user_key));
-        syscall!(client.clear(user_asymetric_key));
 
         Ok(())
+    }
+
+    /// Reset PIN and PUK to their defaults with new retry counts, preserving the user
+    /// private key (and therefore every provisioned slot). `user_asymetric_key` is the
+    /// live private key obtained after PIN verification.
+    pub fn set_pin_retries<T: crate::Client>(
+        &mut self,
+        client: &mut T,
+        options: &crate::Options,
+        user_asymetric_key: KeyId,
+        pin_retries: u8,
+        puk_retries: u8,
+    ) -> Result<(), Status> {
+        Self::wrap_user_key(
+            client,
+            options,
+            user_asymetric_key,
+            pin_retries,
+            puk_retries,
+        )?;
+        self.pin_total_retries = pin_retries;
+        self.puk_total_retries = puk_retries;
+        self.save(client);
+        Ok(())
+    }
+
+    /// The configured total retry count for the PIN
+    pub fn pin_total_retries(&self) -> u8 {
+        self.pin_total_retries
+    }
+
+    /// The configured total retry count for the PUK
+    pub fn puk_total_retries(&self) -> u8 {
+        self.puk_total_retries
     }
 
     pub fn initialize<T: crate::Client>(
@@ -999,6 +1078,8 @@ impl Persistent {
         let mut state = Self {
             keys,
             timestamp: 0,
+            pin_total_retries: Self::PIN_RETRIES_DEFAULT,
+            puk_total_retries: Self::PUK_RETRIES_DEFAULT,
             storage: options.storage,
         };
         state.generate_asymmetric_key(
