@@ -650,6 +650,35 @@
                 input: "00 F7 00 9B 00",
                 output: Data("01 01 03 02 02 01 01 05 01 01"),
             ),
+            // changing the management key clears the default flag
+            SetManagementKey(
+                key: (
+                    algorithm: Aes256,
+                    key: "0102030405060708 0102030405060708 0102030405060708 0102030405060708"
+                )
+            ),
+            IoData(
+                input: "00 F7 00 9B 00",
+                output: Data("01 01 0C 02 02 01 01 05 01 00"),
+            ),
+            // and setting it back to the well-known default raises it again
+            AuthenticateManagement(
+                key: (
+                    algorithm: Aes256,
+                    key: "0102030405060708 0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            SetManagementKey(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                )
+            ),
+            IoData(
+                input: "00 F7 00 9B 00",
+                output: Data("01 01 03 02 02 01 01 05 01 01"),
+            ),
             // a truncated scalar is rejected
             ImportEccKey(
                 key_reference: 0x9A,

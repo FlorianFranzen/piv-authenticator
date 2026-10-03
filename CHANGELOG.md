@@ -10,6 +10,7 @@
   (0xFF means no touch, 0xFE means touch required)
 - Support importing ECC keys (P-256 and P-384) through the Yubico IMPORT ASYMMETRIC KEY
   extension, into any asymmetric key slot including the retired ones ([#16][])
+- Clear the management key's default flag when the key is changed
 - Implement GET METADATA for all key references: algorithm, enforced PIN/touch policy,
   origin and public key for the asymmetric slots (stored at import/generate time), retry
   counters and default flags for PIN and PUK, and algorithm and default flag for the

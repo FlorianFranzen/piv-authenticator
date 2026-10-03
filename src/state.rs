@@ -797,6 +797,8 @@ impl Persistent {
         .key;
         let old_management_key = self.keys.administration.id;
         self.keys.administration = KeyWithAlg { id, alg };
+        self.keys.is_admin_default = management_key == YUBICO_DEFAULT_MANAGEMENT_KEY
+            && alg == YUBICO_DEFAULT_MANAGEMENT_KEY_ALG;
         self.save(client);
         syscall!(client.delete(old_management_key));
     }
