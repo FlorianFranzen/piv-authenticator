@@ -11,6 +11,8 @@
 - Reset the security state when the application is selected, like a YubiKey does
 - Report the remaining retries from failed CHANGE REFERENCE DATA, and blocked once
   they are exhausted, instead of a plain verification failure
+- Answer GET DATA for an empty key history object with NotFound, like a YubiKey
+  without one
 
 ## [v0.7.0][] (2026-08-17)
 

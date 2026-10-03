@@ -1062,6 +1062,14 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             }
         }
 
+        // A YubiKey has no key history object until one is written. Some
+        // clients (yubikey.rs) read this object while enumerating certificates
+        // and fail on data that does not parse as one, so stay absent while
+        // there is nothing to report.
+        if num_certs == 0 {
+            return Err(Status::NotFound);
+        }
+
         reply.expand(&[0xC1, 0x01])?;
         reply.expand(&[num_certs])?;
         reply.expand(&[0xC2, 0x01])?;
