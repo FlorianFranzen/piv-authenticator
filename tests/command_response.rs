@@ -162,6 +162,13 @@ impl Curve {
         }
     }
 
+    fn field_len(self) -> usize {
+        match self {
+            Self::P256 => 32,
+            Self::P384 => 48,
+        }
+    }
+
     fn algorithm(self) -> Algorithm {
         match self {
             Self::P256 => Algorithm::P256,
@@ -394,7 +401,7 @@ enum IoCmd {
     /// randomized, so the signature bytes cannot be matched directly)
     SignEcc {
         key_reference: u8,
-        /// Hex-encoded digest to sign (32 or 48 bytes, selects the curve)
+        /// Hex-encoded digest to sign, 1 to field-size bytes; the scalar selects the curve
         data: String,
         /// Hex-encoded private scalar that was imported into the slot
         scalar: String,
@@ -628,7 +635,10 @@ impl IoCmd {
         assert_eq!(tag, 0x7C);
         let (tag, signature, _) = take_tlv(value).expect("no response DO");
         assert_eq!(tag, 0x82);
-        curve.verify(&scalar, &digest, signature);
+        // the card signs the digest as a big-endian integer of the field size
+        let mut padded = vec![0; curve.field_len()];
+        padded[curve.field_len() - digest.len()..].copy_from_slice(&digest);
+        curve.verify(&scalar, &padded, signature);
     }
 
     fn run_set_administration_key(

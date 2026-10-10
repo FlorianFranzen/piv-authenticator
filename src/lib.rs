@@ -715,9 +715,28 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 let Some(key) = key? else {
                     return Err(Status::ConditionsOfUseNotSatisfied);
                 };
-                if key.alg.sign_len() != message.len() {
-                    return Err(Status::IncorrectDataParameter);
-                }
+                let field_len = key.alg.sign_len();
+                let mut padded = [0; 48];
+                let message = match key.alg {
+                    // A YubiKey signs any digest up to the field size as a big-endian
+                    // integer (clients hash with SHA-256 for P-384 keys by default). The
+                    // backends want exactly the field size (the P-256 software path even
+                    // panics on anything else), so pad on the left here
+                    AsymmetricAlgorithms::P256 | AsymmetricAlgorithms::P384 => {
+                        if message.is_empty() || message.len() > field_len {
+                            return Err(Status::IncorrectDataParameter);
+                        }
+                        padded[field_len - message.len()..field_len].copy_from_slice(message);
+                        &padded[..field_len]
+                    }
+                    #[cfg(feature = "rsa")]
+                    _ => {
+                        if message.len() != field_len {
+                            return Err(Status::IncorrectDataParameter);
+                        }
+                        message
+                    }
+                };
                 let response = syscall!(trussed.sign(
                     key.alg.sign_mechanism(),
                     key.key,

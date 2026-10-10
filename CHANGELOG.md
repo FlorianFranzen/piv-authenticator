@@ -10,6 +10,8 @@
   (0xFF means no touch, 0xFE means touch required)
 - Support importing ECC keys (P-256 and P-384) through the Yubico IMPORT ASYMMETRIC KEY
   extension, into any asymmetric key slot including the retired ones ([#16][])
+- Accept ECDSA digests of any length up to the curve's field size, left-padded like a
+  YubiKey does, instead of exactly the field size
 
 [#16]: https://github.com/trussed-dev/piv-authenticator/issues/16
 
