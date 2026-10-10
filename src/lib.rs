@@ -878,14 +878,18 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             parsed_mechanism,
             self.trussed,
             self.options.storage,
-        );
+        )?;
 
-        let public_key = syscall!(self.trussed.derive_key(
+        let public_key = try_syscall!(self.trussed.derive_key(
             parsed_mechanism.key_mechanism(),
             secret_key,
             None,
             StorageAttributes::default().set_persistence(Location::Volatile)
         ))
+        .map_err(|_err| {
+            warn!("Failed to derive the public key: {_err:?}");
+            Status::IncorrectDataParameter
+        })?
         .key;
 
         match parsed_mechanism {
