@@ -14,76 +14,6 @@
         ]
     ),
     IoTest(
-        name: "Select by RID",
-        cmd_resp: [
-            // Yubico ecosystem clients select with only the 5 byte RID
-            IoData(
-                input: "00 A4 04 00 05 A000000308",
-                output: NonZero,
-            ),
-            // the full AID still works
-            IoData(
-                input: "00 A4 04 00 0B A000000308 00001000 0100",
-                output: NonZero,
-            ),
-            // a different PIX under the same RID is not answered by the app
-            IoData(
-                input: "00 A4 04 00 0B A000000308 00002000 0100",
-                expected_status: NotFound,
-        name: "Select resets the security state",
-        cmd_resp: [
-            VerifyApplicationPin(),
-            // VERIFY with no data reports success while the pin is verified
-            IoData(input: "00 20 00 80"),
-        name: "Key history stays absent while empty",
-        cmd_resp: [
-            GetData(
-                input: "5C 03 5FC10C",
-                output: All(),
-                expected_status: NotFound,
-            ),
-            AuthenticateManagement(
-                key: (
-                    algorithm: Tdes,
-                    key: "0102030405060708 0102030405060708 0102030405060708"
-                ),
-                mutual: false,
-            ),
-            Select,
-            // after re-selecting, the pin is no longer verified
-            IoData(input: "00 20 00 80", expected_status: RemainingRetries(3)),
-            // and the management authentication is gone too
-            PutData(
-                input: "5C 01 7E 53 10 000102030405060708090A0B0C0D0E0F",
-                expected_status: SecurityStatusNotSatisfied,
-            ),
-        name: "Change reference data reports remaining retries",
-        cmd_resp: [
-            ChangePuk(old: "3131313131313131", new: "0102030405060708", expected_status: RemainingRetries(4)),
-            ChangePin(old: "3131313131313131", new: "313131313131FFFF", expected_status: RemainingRetries(2)),
-            ChangePin(old: "3131313131313131", new: "313131313131FFFF", expected_status: RemainingRetries(1)),
-            ChangePin(old: "3131313131313131", new: "313131313131FFFF", expected_status: OperationBlocked),
-            // once blocked, even the correct pin is refused
-            ChangePin(new: "313131313131FFFF", expected_status: OperationBlocked),
-            // with a certificate stored for a retired slot, the object appears
-            PutData(
-                input: "5C 03 5FC10D 53 04 DEADBEEF",
-            ),
-            GetData(
-                input: "5C 03 5FC10C",
-                output: Data("53 08 C1 01 01 C2 01 00 FE 00"),
-            ),
-        name: "Malformed pin burns a retry",
-        cmd_resp: [
-            // eight 0xFF bytes can never match, but count like a wrong pin
-            VerifyApplicationPin(pin: "FFFFFFFFFFFFFFFF", expected_status: RemainingRetries(2)),
-            VerifyApplicationPin(pin: "FFFFFFFFFFFFFFFF", expected_status: RemainingRetries(1)),
-            // the correct pin still verifies and resets the counter
-            VerifyApplicationPin(),
-            VerifyApplicationPin(pin: "FFFFFFFFFFFFFFFF", expected_status: RemainingRetries(2)),
-        ]
-    ),
-    IoTest(
         name: "Bad management key",
         cmd_resp: [
             AuthenticateManagement(
@@ -334,247 +264,6 @@
         ]
     ),
     IoTest(
-        name: "Unknown data object",
-        cmd_resp: [
-            GetData(
-                input: "5C 03 5FFF00",
-                expected_status: NotFound
-            ),
-            GetData(
-                input: "5C 03 5FABCD",
-                expected_status: NotFound
-            ),
-            GetData(
-                input: "5C 03 5FC1FF",
-        name: "Empty PUT DATA deletes",
-        cmd_resp: [
-            AuthenticateManagement(
-                key: (
-                    algorithm: Tdes,
-                    key: "0102030405060708 0102030405060708 0102030405060708"
-                ),
-                mutual: false,
-            ),
-            PutData(
-                input: "5C 03 5FC10B 53 04 00010203",
-            ),
-            GetData(
-                input: "5C 03 5FC10B",
-                output: Data("53 04 00010203")
-            ),
-            PutData(
-                input: "5C 03 5FC10B 53 00",
-            ),
-            GetData(
-                input: "5C 03 5FC10B",
-                output: All(),
-                expected_status: NotFound
-            ),
-            PutData(
-                input: "5C 03 5FC10D 53 04 00010203",
-            ),
-            GetData(
-                input: "5C 03 5FC10C",
-                output: Data("53 08 C1 01 01 C2 01 00 FE 00")
-            ),
-            PutData(
-                input: "5C 03 5FC10D 53 00",
-            ),
-            GetData(
-                input: "5C 03 5FC10C",
-                output: Data("53 08 C1 01 00 C2 01 00 FE 00")
-            ),
-            PutData(
-                input: "5C 03 5FC103 53 04 00010203",
-            ),
-            VerifyApplicationPin(),
-            GetData(
-                input: "5C 03 5FC103",
-                output: Data("53 04 00010203")
-            ),
-            PutData(
-                input: "5C 03 5FC103 53 00",
-            ),
-            GetData(
-                input: "5C 03 5FC103",
-                output: All(),
-                expected_status: NotFound
-            ),
-            PutData(
-                input: "5C 03 5FC102 53 00",
-            ),
-            GetData(
-                input: "5C 03 5FC102",
-                output: All(),
-                expected_status: NotFound
-            ),
-        ]
-    ),
-    IoTest(
-        name: "Generate Ed25519 key and sign",
-        cmd_resp: [
-            AuthenticateManagement(
-                key: (
-                    algorithm: Tdes,
-                    key: "0102030405060708 0102030405060708 0102030405060708"
-                ),
-                mutual: false,
-            ),
-            IoData(
-                input: "00 47 009A 05
-                                AC 03
-                                     80 01 E0",
-                // 7F49 22 { 86 20 <raw 32 byte public key> }
-                output: Len(37),
-            ),
-            VerifyApplicationPin(),
-            // Ed25519 signs the message itself, any length up to the trussed limit
-            Sign(
-                algo: 0xE0,
-                key_reference: 0x9A,
-                data: "",
-                // 7C 42 { 82 40 <64 byte signature> }
-                output: Len(68),
-            ),
-            Sign(
-                algo: 0xE0,
-                key_reference: 0x9A,
-                data: "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F",
-                output: Len(68),
-            ),
-            // Messages above the trussed limit (1024 bytes) are rejected instead of panicking
-            Sign(
-                algo: 0xE0,
-                key_reference: 0x9A,
-                data: "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00",
-                output: Len(0),
-                expected_status: IncorrectDataParameter,
-            ),
-        ]
-    ),
-    IoTest(
-        name: "Import Ed25519 key and sign",
-        cmd_resp: [
-            AuthenticateManagement(
-                key: (
-                    algorithm: Tdes,
-                    key: "0102030405060708 0102030405060708 0102030405060708"
-                ),
-                mutual: false,
-            ),
-            // RFC 8032 section 7.1 test 2: the seed goes into 0x07 as with Yubico
-            IoData(
-                input: "00 FE E0 9A 22
-                                07 20 4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
-                output: Len(0),
-            ),
-            VerifyApplicationPin(),
-            Sign(
-                algo: 0xE0,
-                key_reference: 0x9A,
-                data: "72",
-                output: Data("
-                    7C 42
-                        82 40
-                        92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00
-                "),
-            ),
-            // A key of the wrong length is rejected
-            IoData(
-                input: "00 FE E0 9D 12
-                                07 10 4ccd089b28ff96da9db6c346ec114e0f",
-                output: Len(0),
-                expected_status: IncorrectDataParameter,
-            ),
-        ]
-    ),
-    IoTest(
-        name: "Generate X25519 key and agree",
-        cmd_resp: [
-            AuthenticateManagement(
-                key: (
-                    algorithm: Tdes,
-                    key: "0102030405060708 0102030405060708 0102030405060708"
-                ),
-                mutual: false,
-            ),
-            IoData(
-                input: "00 47 009D 05
-                                AC 03
-                                     80 01 E1",
-                // 7F49 22 { 86 20 <raw 32 byte public key> }
-                output: Len(37),
-            ),
-            VerifyApplicationPin(),
-            // Key agreement with a raw 32 byte peer key in 0x85
-            IoData(
-                input: "00 87 E1 9D 26
-                                7C 24
-                                     82 00
-                                     85 20 de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f",
-                // 7C 22 { 82 20 <32 byte shared secret> }
-                output: Len(36),
-            ),
-            // X25519 keys cannot sign
-            Sign(
-                algo: 0xE1,
-                key_reference: 0x9D,
-                data: "72",
-                output: Len(0),
-                expected_status: ConditionsOfUseNotSatisfied,
-            ),
-        ]
-    ),
-    IoTest(
-        name: "Import X25519 key and agree",
-        cmd_resp: [
-            AuthenticateManagement(
-                key: (
-                    algorithm: Tdes,
-                    key: "0102030405060708 0102030405060708 0102030405060708"
-                ),
-                mutual: false,
-            ),
-            // RFC 7748 section 6.1: Alice's private key goes into 0x08 as with Yubico
-            IoData(
-                input: "00 FE E1 9D 22
-                                08 20 77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
-                output: Len(0),
-            ),
-            VerifyApplicationPin(),
-            // Bob's public key gives the shared secret K of the RFC
-            IoData(
-                input: "00 87 E1 9D 26
-                                7C 24
-                                     82 00
-                                     85 20 de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f",
-                output: Data("
-                    7C 22
-                        82 20
-                        4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742
-                "),
-            ),
-            // A peer key of the wrong length is rejected
-            IoData(
-                input: "00 87 E1 9D 16
-                                7C 14
-                                     82 00
-                                     85 10 de9edb7d7b7dc1b4d35b61c2ece43537",
-                output: Len(0),
-                expected_status: IncorrectDataParameter,
-            ),
-            // A low-order peer key (order 4) would yield an all-zero secret and is rejected
-            IoData(
-                input: "00 87 E1 9D 26
-                                7C 24
-                                     82 00
-                                     85 20 0100000000000000000000000000000000000000000000000000000000000000",
-                output: Len(0),
-                expected_status: IncorrectDataParameter,
-            ),
-        ]
-    ),
-    IoTest(
         name: "PUT DATA",
         cmd_resp: [
             GetData(
@@ -811,6 +500,40 @@
         ]
     ),
     IoTest(
+        name: "Protected DOS",
+        uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
+        cmd_resp: [
+            GetData(
+                input: "5C 03 5FC108",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            GetData(
+                input: "5C 03 5FC108",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            VerifyApplicationPin(),
+            GetData(
+                input: "5C 03 5FC108",
+                output: All(),
+                expected_status: NotFound,
+            ),
+            PutData(
+                input: "5C 03 5FC108 53 10 000102030405060708090A0B0C0D0E0F",
+            ),
+            GetData(
+                input: "5C 03 5FC108",
+                output: Data("53 10 000102030405060708090A0B0C0D0E0F"),
+            ),
+        ],
+    ),
+    IoTest(
         name: "msroots objects",
         cmd_resp: [
             GetData(
@@ -820,82 +543,6 @@
             ),
             PutData(
                 input: "5C 03 5FFF11 53 04 DEADBEEF",
-        name: "PIN and PUK default flags",
-        cmd_resp: [
-            IoData(
-                input: "00 F7 00 80 00",
-                output: Data("01 01 FF 05 01 01 06 02 03 03"),
-            ),
-            IoData(
-                input: "00 F7 00 81 00",
-                output: Data("01 01 FF 05 01 01 06 02 05 05"),
-            ),
-            // changing a credential clears its default flag
-            ChangePin(
-                new: "313131313131FFFF",
-            ),
-            IoData(
-                input: "00 F7 00 80 00",
-                output: Data("01 01 FF 05 01 00 06 02 03 03"),
-            ),
-            IoData(
-                input: "00 F7 00 81 00",
-                output: Data("01 01 FF 05 01 01 06 02 05 05"),
-            ),
-            ChangePuk(
-                new: "0102030405060708",
-            ),
-            IoData(
-                input: "00 F7 00 81 00",
-                output: Data("01 01 FF 05 01 00 06 02 05 05"),
-            ),
-            // the flags follow the value, so setting the default again restores them
-            ResetRetryCounter(puk: "0102030405060708", new_pin: "313233343536FFFF"),
-            IoData(
-                input: "00 F7 00 80 00",
-                output: Data("01 01 FF 05 01 01 06 02 03 03"),
-            ),
-            ResetRetryCounter(puk: "0102030405060708", new_pin: "3132333435363738"),
-            IoData(
-                input: "00 F7 00 80 00",
-                output: Data("01 01 FF 05 01 00 06 02 03 03"),
-            ),
-            ChangePuk(
-                old: "0102030405060708",
-                new: "3132333435363738",
-            ),
-            IoData(
-                input: "00 F7 00 81 00",
-                output: Data("01 01 FF 05 01 01 06 02 05 05"),
-            ),
-        ]
-    ),
-    IoTest(
-        name: "GET METADATA on a fresh card",
-        cmd_resp: [
-            // 9A and 9E carry an algorithm from initialization but no reportable key
-            IoData(
-                input: "00 F7 00 9A 00",
-                expected_status: KeyReferenceNotFound,
-            ),
-            IoData(
-                input: "00 F7 00 9E 00",
-                expected_status: KeyReferenceNotFound,
-            ),
-            IoData(
-                input: "00 F7 00 9C 00",
-                expected_status: KeyReferenceNotFound,
-            ),
-        ]
-    ),
-    IoTest(
-        name: "ECC key import",
-        uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
-        cmd_resp: [
-            // import requires management key authentication
-            ImportEccKey(
-                key_reference: 0x9A,
-                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
                 expected_status: SecurityStatusNotSatisfied,
             ),
             AuthenticateManagement(
@@ -928,12 +575,219 @@
                 input: "5C 03 5FFF11",
                 output: All(),
                 expected_status: NotFound,
+            ),
+        ]
+    ),
+    IoTest(
         name: "Serial derived from the uuid",
         uuid_config: WithUuid("00112233445566778899AABBCCDDEEFF"),
         cmd_resp: [
             IoData(
                 input: "00 F8 00 00 00",
                 output: Data("00 11 22 33"),
+            ),
+        ]
+    ),
+    IoTest(
+        name: "Serial without a uuid",
+        uuid_config: None,
+        cmd_resp: [
+            IoData(
+                input: "00 F8 00 00 00",
+                output: Data("00 52 F7 43"),
+            ),
+        ]
+    ),
+    IoTest(
+        name: "Select by RID",
+        cmd_resp: [
+            // Yubico ecosystem clients select with only the 5 byte RID
+            IoData(
+                input: "00 A4 04 00 05 A000000308",
+                output: NonZero,
+            ),
+            // the full AID still works
+            IoData(
+                input: "00 A4 04 00 0B A000000308 00001000 0100",
+                output: NonZero,
+            ),
+            // a different PIX under the same RID is not answered by the app
+            IoData(
+                input: "00 A4 04 00 0B A000000308 00002000 0100",
+                expected_status: NotFound,
+            ),
+        ]
+    ),
+    IoTest(
+        name: "Select resets the security state",
+        cmd_resp: [
+            VerifyApplicationPin(),
+            // VERIFY with no data reports success while the pin is verified
+            IoData(input: "00 20 00 80"),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            Select,
+            // after re-selecting, the pin is no longer verified
+            IoData(input: "00 20 00 80", expected_status: RemainingRetries(3)),
+            // and the management authentication is gone too
+            PutData(
+                input: "5C 01 7E 53 10 000102030405060708090A0B0C0D0E0F",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+        ]
+    ),
+    IoTest(
+        name: "Change reference data reports remaining retries",
+        cmd_resp: [
+            ChangePuk(old: "3131313131313131", new: "0102030405060708", expected_status: RemainingRetries(4)),
+            ChangePin(old: "3131313131313131", new: "313131313131FFFF", expected_status: RemainingRetries(2)),
+            ChangePin(old: "3131313131313131", new: "313131313131FFFF", expected_status: RemainingRetries(1)),
+            ChangePin(old: "3131313131313131", new: "313131313131FFFF", expected_status: OperationBlocked),
+            // once blocked, even the correct pin is refused
+            ChangePin(new: "313131313131FFFF", expected_status: OperationBlocked),
+        ]
+    ),
+    IoTest(
+        name: "Key history stays absent while empty",
+        cmd_resp: [
+            GetData(
+                input: "5C 03 5FC10C",
+                output: All(),
+                expected_status: NotFound,
+            ),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            // with a certificate stored for a retired slot, the object appears
+            PutData(
+                input: "5C 03 5FC10D 53 04 DEADBEEF",
+            ),
+            GetData(
+                input: "5C 03 5FC10C",
+                output: Data("53 08 C1 01 01 C2 01 00 FE 00"),
+            ),
+        ]
+    ),
+    IoTest(
+        name: "Malformed pin burns a retry",
+        cmd_resp: [
+            // eight 0xFF bytes can never match, but count like a wrong pin
+            VerifyApplicationPin(pin: "FFFFFFFFFFFFFFFF", expected_status: RemainingRetries(2)),
+            VerifyApplicationPin(pin: "FFFFFFFFFFFFFFFF", expected_status: RemainingRetries(1)),
+            // the correct pin still verifies and resets the counter
+            VerifyApplicationPin(),
+            VerifyApplicationPin(pin: "FFFFFFFFFFFFFFFF", expected_status: RemainingRetries(2)),
+        ]
+    ),
+    IoTest(
+        name: "Unknown data object",
+        cmd_resp: [
+            GetData(
+                input: "5C 03 5FFF00",
+                expected_status: NotFound
+            ),
+            GetData(
+                input: "5C 03 5FABCD",
+                expected_status: NotFound
+            ),
+            GetData(
+                input: "5C 03 5FC1FF",
+                expected_status: NotFound
+            ),
+        ]
+    ),
+    IoTest(
+        name: "Empty PUT DATA deletes",
+        cmd_resp: [
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            PutData(
+                input: "5C 03 5FC10B 53 04 00010203",
+            ),
+            GetData(
+                input: "5C 03 5FC10B",
+                output: Data("53 04 00010203")
+            ),
+            PutData(
+                input: "5C 03 5FC10B 53 00",
+            ),
+            GetData(
+                input: "5C 03 5FC10B",
+                output: All(),
+                expected_status: NotFound
+            ),
+            PutData(
+                input: "5C 03 5FC10D 53 04 00010203",
+            ),
+            GetData(
+                input: "5C 03 5FC10C",
+                output: Data("53 08 C1 01 01 C2 01 00 FE 00")
+            ),
+            PutData(
+                input: "5C 03 5FC10D 53 00",
+            ),
+            GetData(
+                input: "5C 03 5FC10C",
+                output: All(),
+                expected_status: NotFound
+            ),
+            PutData(
+                input: "5C 03 5FC103 53 04 00010203",
+            ),
+            VerifyApplicationPin(),
+            GetData(
+                input: "5C 03 5FC103",
+                output: Data("53 04 00010203")
+            ),
+            PutData(
+                input: "5C 03 5FC103 53 00",
+            ),
+            GetData(
+                input: "5C 03 5FC103",
+                output: All(),
+                expected_status: NotFound
+            ),
+            PutData(
+                input: "5C 03 5FC102 53 00",
+            ),
+            GetData(
+                input: "5C 03 5FC102",
+                output: All(),
+                expected_status: NotFound
+            ),
+        ]
+    ),
+    IoTest(
+        name: "ECC key import",
+        uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
+        cmd_resp: [
+            // import requires management key authentication
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
             // P-256 into the four standard-ish slots and a retired one
             ImportEccKey(
                 key_reference: 0x9A,
@@ -1103,12 +957,75 @@
         ]
     ),
     IoTest(
-        name: "Serial without a uuid",
-        uuid_config: None,
+        name: "PIN and PUK default flags",
         cmd_resp: [
             IoData(
-                input: "00 F8 00 00 00",
-                output: Data("00 52 F7 43"),
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 05 01 01 06 02 03 03"),
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 05 01 01 06 02 05 05"),
+            ),
+            // changing a credential clears its default flag
+            ChangePin(
+                new: "313131313131FFFF",
+            ),
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 05 01 00 06 02 03 03"),
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 05 01 01 06 02 05 05"),
+            ),
+            ChangePuk(
+                new: "0102030405060708",
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 05 01 00 06 02 05 05"),
+            ),
+            // the flags follow the value, so setting the default again restores them
+            ResetRetryCounter(puk: "0102030405060708", new_pin: "313233343536FFFF"),
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 05 01 01 06 02 03 03"),
+            ),
+            ResetRetryCounter(puk: "0102030405060708", new_pin: "3132333435363738"),
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 05 01 00 06 02 03 03"),
+            ),
+            ChangePuk(
+                old: "0102030405060708",
+                new: "3132333435363738",
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 05 01 01 06 02 05 05"),
+            ),
+        ]
+    ),
+    IoTest(
+        name: "GET METADATA on a fresh card",
+        cmd_resp: [
+            // 9A and 9E carry an algorithm from initialization but no reportable key
+            IoData(
+                input: "00 F7 00 9A 00",
+                expected_status: KeyReferenceNotFound,
+            ),
+            IoData(
+                input: "00 F7 00 9E 00",
+                expected_status: KeyReferenceNotFound,
+            ),
+            IoData(
+                input: "00 F7 00 9C 00",
+                expected_status: KeyReferenceNotFound,
+            ),
+        ]
+    ),
+    IoTest(
         name: "Key policies",
         uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
         cmd_resp: [
@@ -1218,40 +1135,6 @@
         ]
     ),
     IoTest(
-        name: "Protected DOS",
-        uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
-        cmd_resp: [
-            GetData(
-                input: "5C 03 5FC108",
-                expected_status: SecurityStatusNotSatisfied,
-            ),
-            AuthenticateManagement(
-                key: (
-                    algorithm: Tdes,
-                    key: "0102030405060708 0102030405060708 0102030405060708"
-                ),
-                mutual: false,
-            ),
-            GetData(
-                input: "5C 03 5FC108",
-                expected_status: SecurityStatusNotSatisfied,
-            ),
-            VerifyApplicationPin(),
-            GetData(
-                input: "5C 03 5FC108",
-                output: All(),
-                expected_status: NotFound,
-            ),
-            PutData(
-                input: "5C 03 5FC108 53 10 000102030405060708090A0B0C0D0E0F",
-            ),
-            GetData(
-                input: "5C 03 5FC108",
-                output: Data("53 10 000102030405060708090A0B0C0D0E0F"),
-            ),
-        ],
-    ),
-    IoTest(
         name: "Set pin retries",
         cmd_resp: [
             // needs management authentication and a verified pin
@@ -1314,13 +1197,8 @@
         ]
     ),
     IoTest(
-        name: "Protected DOS",
-        uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
+        name: "Generate Ed25519 key and sign",
         cmd_resp: [
-            GetData(
-                input: "5C 03 5FC108",
-                expected_status: SecurityStatusNotSatisfied,
-            ),
             AuthenticateManagement(
                 key: (
                     algorithm: Tdes,
@@ -1328,24 +1206,159 @@
                 ),
                 mutual: false,
             ),
-            GetData(
-                input: "5C 03 5FC108",
-                expected_status: SecurityStatusNotSatisfied,
+            IoData(
+                input: "00 47 009A 05
+                                AC 03
+                                     80 01 E0",
+                // 7F49 22 { 86 20 <raw 32 byte public key> }
+                output: Len(37),
             ),
             VerifyApplicationPin(),
-            GetData(
-                input: "5C 03 5FC108",
-                output: All(),
-                expected_status: NotFound,
+            // Ed25519 signs the message itself, any length up to the trussed limit
+            Sign(
+                algo: 0xE0,
+                key_reference: 0x9A,
+                data: "",
+                // 7C 42 { 82 40 <64 byte signature> }
+                output: Len(68),
             ),
-            PutData(
-                input: "5C 03 5FC108 53 10 000102030405060708090A0B0C0D0E0F",
+            Sign(
+                algo: 0xE0,
+                key_reference: 0x9A,
+                data: "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F",
+                output: Len(68),
             ),
-            GetData(
-                input: "5C 03 5FC108",
-                output: Data("53 10 000102030405060708090A0B0C0D0E0F"),
+            // Messages above the trussed limit (1024 bytes) are rejected instead of panicking
+            Sign(
+                algo: 0xE0,
+                key_reference: 0x9A,
+                data: "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00",
+                output: Len(0),
+                expected_status: IncorrectDataParameter,
             ),
-        ],
+        ]
+    ),
+    IoTest(
+        name: "Import Ed25519 key and sign",
+        cmd_resp: [
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            // RFC 8032 section 7.1 test 2: the seed goes into 0x07 as with Yubico
+            IoData(
+                input: "00 FE E0 9A 22
+                                07 20 4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+                output: Len(0),
+            ),
+            VerifyApplicationPin(),
+            Sign(
+                algo: 0xE0,
+                key_reference: 0x9A,
+                data: "72",
+                output: Data("
+                    7C 42
+                        82 40
+                        92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00
+                "),
+            ),
+            // A key of the wrong length is rejected
+            IoData(
+                input: "00 FE E0 9D 12
+                                07 10 4ccd089b28ff96da9db6c346ec114e0f",
+                output: Len(0),
+                expected_status: IncorrectDataParameter,
+            ),
+        ]
+    ),
+    IoTest(
+        name: "Generate X25519 key and agree",
+        cmd_resp: [
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            IoData(
+                input: "00 47 009D 05
+                                AC 03
+                                     80 01 E1",
+                // 7F49 22 { 86 20 <raw 32 byte public key> }
+                output: Len(37),
+            ),
+            VerifyApplicationPin(),
+            // Key agreement with a raw 32 byte peer key in 0x85
+            IoData(
+                input: "00 87 E1 9D 26
+                                7C 24
+                                     82 00
+                                     85 20 de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f",
+                // 7C 22 { 82 20 <32 byte shared secret> }
+                output: Len(36),
+            ),
+            // X25519 keys cannot sign
+            Sign(
+                algo: 0xE1,
+                key_reference: 0x9D,
+                data: "72",
+                output: Len(0),
+                expected_status: ConditionsOfUseNotSatisfied,
+            ),
+        ]
+    ),
+    IoTest(
+        name: "Import X25519 key and agree",
+        cmd_resp: [
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            // RFC 7748 section 6.1: Alice's private key goes into 0x08 as with Yubico
+            IoData(
+                input: "00 FE E1 9D 22
+                                08 20 77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
+                output: Len(0),
+            ),
+            VerifyApplicationPin(),
+            // Bob's public key gives the shared secret K of the RFC
+            IoData(
+                input: "00 87 E1 9D 26
+                                7C 24
+                                     82 00
+                                     85 20 de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f",
+                output: Data("
+                    7C 22
+                        82 20
+                        4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742
+                "),
+            ),
+            // A peer key of the wrong length is rejected
+            IoData(
+                input: "00 87 E1 9D 16
+                                7C 14
+                                     82 00
+                                     85 10 de9edb7d7b7dc1b4d35b61c2ece43537",
+                output: Len(0),
+                expected_status: IncorrectDataParameter,
+            ),
+            // A low-order peer key (order 4) would yield an all-zero secret and is rejected
+            IoData(
+                input: "00 87 E1 9D 26
+                                7C 24
+                                     82 00
+                                     85 20 0100000000000000000000000000000000000000000000000000000000000000",
+                output: Len(0),
+                expected_status: IncorrectDataParameter,
+            ),
+        ]
     ),
     IoTest(
         name: "ECDSA digest lengths",

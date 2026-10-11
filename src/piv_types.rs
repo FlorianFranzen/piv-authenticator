@@ -242,6 +242,8 @@ impl AsymmetricAlgorithms {
             Self::Rsa2048 | Self::Rsa3072 | Self::Rsa4096 => None,
             Self::P256 => Some(32),
             Self::P384 => Some(48),
+            // the curve25519 keys are imported through their own 32 byte DOs
+            Self::Ed25519 | Self::X25519 => None,
         }
     }
 
