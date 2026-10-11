@@ -19,6 +19,7 @@
 - Let a malformed PIN of the right length burn a retry instead of rejecting it as a
   format error
 - Validate the new PIN in RESET RETRY COUNTER
+- Answer NotFound to GET DATA for an unknown data object tag
 
 ## [v0.7.0][] (2026-08-17)
 
