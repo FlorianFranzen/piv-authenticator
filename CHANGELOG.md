@@ -36,6 +36,8 @@
   request; "cached" reuses a confirmed touch for 15 seconds. Pin policy "never" is
   rejected on every slot but 9E, whose key alone is not stored sealed to the PIN
   ([#31][], [#32][])
+- Accept ECDSA digests of any length up to the curve's field size, left-padded like a
+  YubiKey does, instead of exactly the field size
 
 [#15]: https://github.com/trussed-dev/piv-authenticator/issues/15
 [#16]: https://github.com/trussed-dev/piv-authenticator/issues/16

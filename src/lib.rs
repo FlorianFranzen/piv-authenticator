@@ -809,14 +809,33 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                     warn!("Attempt to sign with a key agreement only algorithm");
                     return Err(Status::ConditionsOfUseNotSatisfied);
                 };
-                let message_ok = match key.alg.sign_input_len() {
-                    Some(len) => message.len() == len,
+                let mut padded = [0; 48];
+                let message = match (key.alg, key.alg.sign_input_len()) {
+                    // A YubiKey signs any digest up to the field size as a big-endian
+                    // integer (clients hash with SHA-256 for P-384 keys by default). The
+                    // backends want exactly the field size (the P-256 software path even
+                    // panics on anything else), so pad on the left here
+                    (AsymmetricAlgorithms::P256 | AsymmetricAlgorithms::P384, Some(field_len)) => {
+                        if message.is_empty() || message.len() > field_len {
+                            return Err(Status::IncorrectDataParameter);
+                        }
+                        padded[field_len - message.len()..field_len].copy_from_slice(message);
+                        &padded[..field_len]
+                    }
+                    (_, Some(len)) => {
+                        if message.len() != len {
+                            return Err(Status::IncorrectDataParameter);
+                        }
+                        message
+                    }
                     // Arbitrary-length message, bounded by what trussed accepts
-                    None => message.len() <= trussed_core::config::MAX_MESSAGE_LENGTH,
+                    (_, None) => {
+                        if message.len() > trussed_core::config::MAX_MESSAGE_LENGTH {
+                            return Err(Status::IncorrectDataParameter);
+                        }
+                        message
+                    }
                 };
-                if !message_ok {
-                    return Err(Status::IncorrectDataParameter);
-                }
                 let response = syscall!(trussed.sign(
                     mechanism,
                     key.key,

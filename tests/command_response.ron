@@ -1347,4 +1347,70 @@
             ),
         ],
     ),
+    IoTest(
+        name: "ECDSA digest lengths",
+        cmd_resp: [
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            // 9E signs without a PIN; a digest shorter than the field is left-padded
+            ImportEccKey(
+                key_reference: 0x9E,
+                scalar: "2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4",
+                scalar: "2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8",
+                scalar: "2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+            // an empty digest and one longer than the field are refused
+            SignEcc(
+                key_reference: 0x9E,
+                data: "",
+                scalar: "2222222222222222222222222222222222222222222222222222222222222222",
+                expected_status: IncorrectDataParameter,
+            ),
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFFF0",
+                scalar: "2222222222222222222222222222222222222222222222222222222222222222",
+                expected_status: IncorrectDataParameter,
+            ),
+            ImportEccKey(
+                key_reference: 0x9E,
+                scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+            ),
+            // a SHA-256 digest signed with a P-384 key, the ykman default
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+            ),
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4",
+                scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+            ),
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFFF0",
+                scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+            ),
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFFF0D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0",
+                scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+                expected_status: IncorrectDataParameter,
+            ),
+        ]
+    ),
 ]
