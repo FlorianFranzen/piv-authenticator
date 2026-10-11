@@ -43,6 +43,8 @@
 [#32]: https://github.com/trussed-dev/piv-authenticator/issues/32
 - Add Ed25519 key generation, import and signing (algorithm identifier `0xE0`)
 - Add X25519 key generation, import and key agreement (algorithm identifier `0xE1`)
+- Answer `6A80` instead of panicking when the backend does not provide the mechanism
+  GENERATE ASYMMETRIC or an RSA IMPORT ASYMMETRIC KEY asks for
 
 ## [v0.7.0][] (2026-08-17)
 
