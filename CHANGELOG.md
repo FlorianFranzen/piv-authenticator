@@ -41,6 +41,8 @@
 [#16]: https://github.com/trussed-dev/piv-authenticator/issues/16
 [#31]: https://github.com/trussed-dev/piv-authenticator/issues/31
 [#32]: https://github.com/trussed-dev/piv-authenticator/issues/32
+- Add Ed25519 key generation, import and signing (algorithm identifier `0xE0`)
+- Add X25519 key generation, import and key agreement (algorithm identifier `0xE1`)
 
 ## [v0.7.0][] (2026-08-17)
 

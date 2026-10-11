@@ -157,7 +157,7 @@ where
             .with_application_label(self.options.label)
             .with_application_url(self.options.url)
             .with_supported_cryptographic_algorithms(&[
-                Tdes, Aes256, P256, Rsa2048, Rsa3072, Rsa4096, P384,
+                Tdes, Aes256, P256, Rsa2048, Rsa3072, Rsa4096, P384, Ed25519, X25519,
             ]);
 
         application_property_template
@@ -805,11 +805,20 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 let Some(key) = key? else {
                     return Err(Status::ConditionsOfUseNotSatisfied);
                 };
-                if key.alg.sign_len() != message.len() {
+                let Some(mechanism) = key.alg.sign_mechanism() else {
+                    warn!("Attempt to sign with a key agreement only algorithm");
+                    return Err(Status::ConditionsOfUseNotSatisfied);
+                };
+                let message_ok = match key.alg.sign_input_len() {
+                    Some(len) => message.len() == len,
+                    // Arbitrary-length message, bounded by what trussed accepts
+                    None => message.len() <= trussed_core::config::MAX_MESSAGE_LENGTH,
+                };
+                if !message_ok {
                     return Err(Status::IncorrectDataParameter);
                 }
                 let response = syscall!(trussed.sign(
-                    key.alg.sign_mechanism(),
+                    mechanism,
                     key.key,
                     message,
                     key.alg.sign_serialization(),
@@ -868,14 +877,21 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                     return Err(Status::ConditionsOfUseNotSatisfied);
                 };
 
-                if data.first() != Some(&0x04) {
-                    warn!("Bad data forat for ECDH");
-                    return Err(Status::IncorrectDataParameter);
-                }
+                // X25519 peers send the raw 32 byte u-coordinate, the NIST curves
+                // a SEC1 uncompressed point
+                let peer_key = if key.alg.ecdh_peer_key_is_raw() {
+                    data
+                } else {
+                    if data.first() != Some(&0x04) {
+                        warn!("Bad data format for ECDH");
+                        return Err(Status::IncorrectDataParameter);
+                    }
+                    &data[1..]
+                };
 
                 let public_key = match try_syscall!(trussed.deserialize_key(
                     mechanism,
-                    &data[1..],
+                    peer_key,
                     KeySerialization::Raw,
                     StorageAttributes::default().set_persistence(Location::Volatile)
                 )) {
@@ -903,6 +919,11 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 .serialized_key;
                 syscall!(trussed.delete(public_key));
                 syscall!(trussed.delete(shared_secret));
+                // A low-order X25519 peer key yields an all-zero secret (RFC 7748, section 6.1)
+                if serialized_secret.iter().all(|&b| b == 0) {
+                    warn!("Key agreement produced an all-zero secret");
+                    return Err(Status::IncorrectDataParameter);
+                }
 
                 reply.expand(&[0x7C])?;
                 let offset = reply.len();
@@ -1221,6 +1242,47 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 }
                 Ok(())
             }
+            // The raw 32 byte private key comes in 0x07 for Ed25519 and 0x08 for X25519
+            (AsymmetricAlgorithms::Ed25519 | AsymmetricAlgorithms::X25519, _) => {
+                let tag = if algo == AsymmetricAlgorithms::Ed25519 {
+                    0x07
+                } else {
+                    0x08
+                };
+                let seed = tlv::get_do(&[tag], data).ok_or(Status::IncorrectDataParameter)?;
+                if seed.len() != 32 {
+                    warn!("Curve25519 import with a key of length {}", seed.len());
+                    return Err(Status::IncorrectDataParameter);
+                }
+                let id = try_syscall!(self.trussed.unsafe_inject_key(
+                    algo.key_mechanism(),
+                    seed,
+                    key.storage(self.options.storage),
+                    KeySerialization::Raw
+                ))
+                .map_err(|_err| {
+                    warn!("Failed Curve25519 import: {_err:?}");
+                    Status::IncorrectDataParameter
+                })?
+                .key;
+                self.store_imported_key_metadata(algo, key, id)?;
+                self.state
+                    .persistent
+                    .keys
+                    .policies
+                    .set_policy(key, pin_policy, touch_policy);
+                self.state.persistent.replace_asymmetric_key(
+                    key,
+                    algo,
+                    id,
+                    self.trussed,
+                    self.options.storage,
+                );
+                if key.is_encrypted() {
+                    syscall!(self.trussed.clear(id));
+                }
+                Ok(())
+            }
             #[cfg(feature = "rsa")]
             _ => Err(Status::FunctionNotSupported),
         }
@@ -1376,6 +1438,18 @@ fn serialize_public_key<T: crate::Client>(
             reply.expand(&[0x86])?;
             reply.append_len(serialized_key.len() + 1)?;
             reply.expand(&[0x04])?;
+            reply.expand(&serialized_key)?;
+        }
+        // Raw 32 byte public key in 0x86, no SEC1 prefix
+        AsymmetricAlgorithms::Ed25519 | AsymmetricAlgorithms::X25519 => {
+            let serialized_key = syscall!(trussed.serialize_key(
+                algo.key_mechanism(),
+                public_key,
+                KeySerialization::Raw
+            ))
+            .serialized_key;
+            reply.expand(&[0x86])?;
+            reply.append_len(serialized_key.len())?;
             reply.expand(&serialized_key)?;
         }
         #[cfg(feature = "rsa")]
