@@ -275,6 +275,37 @@ impl AsymmetricKeyReference {
         }
     }
 
+    /// Path to the stored public key metadata (origin byte followed by the
+    /// public key TLVs), readable without PIN verification for GET METADATA
+    pub fn public_key_path(self) -> &'static Path {
+        match self {
+            Self::PivAuthentication => path!("PivAuthentication.pub"),
+            Self::DigitalSignature => path!("DigitalSignature.pub"),
+            Self::KeyManagement => path!("KeyManagement.pub"),
+            Self::CardAuthentication => path!("CardAuthentication.pub"),
+            Self::Retired01 => path!("Retired01.pub"),
+            Self::Retired02 => path!("Retired02.pub"),
+            Self::Retired03 => path!("Retired03.pub"),
+            Self::Retired04 => path!("Retired04.pub"),
+            Self::Retired05 => path!("Retired05.pub"),
+            Self::Retired06 => path!("Retired06.pub"),
+            Self::Retired07 => path!("Retired07.pub"),
+            Self::Retired08 => path!("Retired08.pub"),
+            Self::Retired09 => path!("Retired09.pub"),
+            Self::Retired10 => path!("Retired10.pub"),
+            Self::Retired11 => path!("Retired11.pub"),
+            Self::Retired12 => path!("Retired12.pub"),
+            Self::Retired13 => path!("Retired13.pub"),
+            Self::Retired14 => path!("Retired14.pub"),
+            Self::Retired15 => path!("Retired15.pub"),
+            Self::Retired16 => path!("Retired16.pub"),
+            Self::Retired17 => path!("Retired17.pub"),
+            Self::Retired18 => path!("Retired18.pub"),
+            Self::Retired19 => path!("Retired19.pub"),
+            Self::Retired20 => path!("Retired20.pub"),
+        }
+    }
+
     pub fn is_encrypted(self) -> bool {
         !matches!(self, Self::CardAuthentication)
     }

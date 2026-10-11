@@ -322,7 +322,15 @@
                                 AC 03
                                      80 01 11",
                 output: Len(70),
-            )
+            ),
+            // metadata reports the generated origin and a matching public key
+            CheckMetadata(
+                key_reference: 0x9A,
+                algo: Some(P256),
+                pin_policy: 0x02, // once
+                touch_policy: 0x01, // never
+                origin: 0x01, // generated
+            ),
         ]
     ),
     IoTest(
@@ -648,6 +656,82 @@
             ),
             PutData(
                 input: "5C 03 5FFF11 53 04 DEADBEEF",
+        name: "PIN and PUK default flags",
+        cmd_resp: [
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 05 01 01 06 02 03 03"),
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 05 01 01 06 02 05 05"),
+            ),
+            // changing a credential clears its default flag
+            ChangePin(
+                new: "313131313131FFFF",
+            ),
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 05 01 00 06 02 03 03"),
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 05 01 01 06 02 05 05"),
+            ),
+            ChangePuk(
+                new: "0102030405060708",
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 05 01 00 06 02 05 05"),
+            ),
+            // the flags follow the value, so setting the default again restores them
+            ResetRetryCounter(puk: "0102030405060708", new_pin: "313233343536FFFF"),
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 05 01 01 06 02 03 03"),
+            ),
+            ResetRetryCounter(puk: "0102030405060708", new_pin: "3132333435363738"),
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 05 01 00 06 02 03 03"),
+            ),
+            ChangePuk(
+                old: "0102030405060708",
+                new: "3132333435363738",
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 05 01 01 06 02 05 05"),
+            ),
+        ]
+    ),
+    IoTest(
+        name: "GET METADATA on a fresh card",
+        cmd_resp: [
+            // 9A and 9E carry an algorithm from initialization but no reportable key
+            IoData(
+                input: "00 F7 00 9A 00",
+                expected_status: KeyReferenceNotFound,
+            ),
+            IoData(
+                input: "00 F7 00 9E 00",
+                expected_status: KeyReferenceNotFound,
+            ),
+            IoData(
+                input: "00 F7 00 9C 00",
+                expected_status: KeyReferenceNotFound,
+            ),
+        ]
+    ),
+    IoTest(
+        name: "ECC key import",
+        uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
+        cmd_resp: [
+            // import requires management key authentication
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
                 expected_status: SecurityStatusNotSatisfied,
             ),
             AuthenticateManagement(
@@ -686,6 +770,171 @@
             IoData(
                 input: "00 F8 00 00 00",
                 output: Data("00 11 22 33"),
+            // P-256 into the four standard-ish slots and a retired one
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+            ),
+            ImportEccKey(
+                key_reference: 0x9C,
+                scalar: "1111111111111111111111111111111111111111111111111111111111111111",
+            ),
+            ImportEccKey(
+                key_reference: 0x9E,
+                scalar: "2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+            ImportEccKey(
+                key_reference: 0x82,
+                scalar: "3333333333333333333333333333333333333333333333333333333333333333",
+            ),
+            // P-384 into another retired slot
+            ImportEccKey(
+                key_reference: 0x83,
+                scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+            ),
+            // metadata reports algorithm, enforced policy, origin and public key
+            CheckMetadata(
+                key_reference: 0x9A,
+                scalar: Some("0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20"),
+                pin_policy: 0x02, // once
+                touch_policy: 0x01, // never
+                origin: 0x02, // imported
+            ),
+            CheckMetadata(
+                key_reference: 0x9C,
+                scalar: Some("1111111111111111111111111111111111111111111111111111111111111111"),
+                pin_policy: 0x03, // always
+                touch_policy: 0x01,
+                origin: 0x02,
+            ),
+            CheckMetadata(
+                key_reference: 0x9E,
+                scalar: Some("2222222222222222222222222222222222222222222222222222222222222222"),
+                pin_policy: 0x01, // never
+                touch_policy: 0x01,
+                origin: 0x02,
+            ),
+            CheckMetadata(
+                key_reference: 0x83,
+                scalar: Some("404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F"),
+                pin_policy: 0x02,
+                touch_policy: 0x01,
+                origin: 0x02,
+            ),
+            // an empty slot has no metadata
+            IoData(
+                input: "00 F7 00 84 00",
+                expected_status: KeyReferenceNotFound,
+            ),
+            // PIN, PUK and management key metadata
+            IoData(
+                input: "00 F7 00 80 00",
+                output: Data("01 01 FF 05 01 01 06 02 03 03"),
+            ),
+            IoData(
+                input: "00 F7 00 81 00",
+                output: Data("01 01 FF 05 01 01 06 02 05 05"),
+            ),
+            IoData(
+                input: "00 F7 00 9B 00",
+                output: Data("01 01 03 02 02 01 01 05 01 01"),
+            ),
+            // changing the management key clears the default flag
+            SetManagementKey(
+                key: (
+                    algorithm: Aes256,
+                    key: "0102030405060708 0102030405060708 0102030405060708 0102030405060708"
+                )
+            ),
+            IoData(
+                input: "00 F7 00 9B 00",
+                output: Data("01 01 0C 02 02 01 01 05 01 00"),
+            ),
+            // and setting it back to the well-known default raises it again
+            AuthenticateManagement(
+                key: (
+                    algorithm: Aes256,
+                    key: "0102030405060708 0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            SetManagementKey(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                )
+            ),
+            IoData(
+                input: "00 F7 00 9B 00",
+                output: Data("01 01 03 02 02 01 01 05 01 01"),
+            ),
+            // a truncated scalar is rejected
+            ImportEccKey(
+                key_reference: 0x9A,
+                algo: Some(P256),
+                scalar: "0102030405060708",
+                expected_status: IncorrectDataParameter,
+            ),
+            // a scalar of another curve's length is rejected
+            ImportEccKey(
+                key_reference: 0x9A,
+                algo: Some(P384),
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+                expected_status: IncorrectDataParameter,
+            ),
+            // the zero scalar is not a valid private key
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0000000000000000000000000000000000000000000000000000000000000000",
+                expected_status: IncorrectDataParameter,
+            ),
+            // neither is one at or above the group order
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+                expected_status: IncorrectDataParameter,
+            ),
+            // 9E (card authentication) signs without a PIN
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+            // 9A refuses without a verified PIN
+            SignEcc(
+                key_reference: 0x9A,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            VerifyApplicationPin(),
+            SignEcc(
+                key_reference: 0x9A,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+            ),
+            SignEcc(
+                key_reference: 0x82,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "3333333333333333333333333333333333333333333333333333333333333333",
+            ),
+            SignEcc(
+                key_reference: 0x83,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0F1F2F3F4F5F6F7F8F9FAFBFCFDFEFFF0",
+                scalar: "404142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F606162636465666768696A6B6C6D6E6F",
+            ),
+            // 9C (digital signature) requires the PIN immediately before each use
+            SignEcc(
+                key_reference: 0x9C,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "1111111111111111111111111111111111111111111111111111111111111111",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            VerifyApplicationPin(),
+            SignEcc(
+                key_reference: 0x9C,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "1111111111111111111111111111111111111111111111111111111111111111",
             ),
         ]
     ),
@@ -696,6 +945,111 @@
             IoData(
                 input: "00 F8 00 00 00",
                 output: Data("00 52 F7 43"),
+        name: "Key policies",
+        uuid_config: WithBoth("00112233445566778899AABBCCDDEEFF"),
+        cmd_resp: [
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            // pin policy "once" relaxes the signature slot's default of "always": a
+            // session pin suffices. Touch "cached" asks once (granted automatically by
+            // the virtual platform) and reuses the touch within 15 seconds.
+            ImportEccKey(
+                key_reference: 0x9C,
+                scalar: "4444444444444444444444444444444444444444444444444444444444444444",
+                pin_policy: Some(0x02),
+                touch_policy: Some(0x03),
+            ),
+            CheckMetadata(
+                key_reference: 0x9C,
+                scalar: Some("4444444444444444444444444444444444444444444444444444444444444444"),
+                pin_policy: 0x02,
+                touch_policy: 0x03,
+                origin: 0x02,
+            ),
+            // pin policy "always" tightens the card authentication slot beyond its
+            // pin-free default: each use needs a pin entered just before
+            ImportEccKey(
+                key_reference: 0x9E,
+                scalar: "5555555555555555555555555555555555555555555555555555555555555555",
+                pin_policy: Some(0x03),
+            ),
+            // "once" still means a pin: no pin at all is not enough for the 9C key
+            SignEcc(
+                key_reference: 0x9C,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "4444444444444444444444444444444444444444444444444444444444444444",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "5555555555555555555555555555555555555555555555555555555555555555",
+                expected_status: SecurityStatusNotSatisfied,
+            ),
+            VerifyApplicationPin(),
+            // 9E demands the pin *just* entered; 9C is content with the session pin,
+            // where its default policy would have demanded another fresh one
+            SignEcc(
+                key_reference: 0x9E,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "5555555555555555555555555555555555555555555555555555555555555555",
+            ),
+            SignEcc(
+                key_reference: 0x9C,
+                data: "D1D2D3D4D5D6D7D8D9DADBDCDDDEDFD0E1E2E3E4E5E6E7E8E9EAEBECEDEEEFE0",
+                scalar: "4444444444444444444444444444444444444444444444444444444444444444",
+            ),
+            // generation takes the same policy DOs inside the AC template
+            IoData(
+                input: "00 47 009A 0B
+                                AC 09
+                                     80 01 11
+                                     AA 01 03
+                                     AB 01 01",
+                output: Len(70),
+            ),
+            CheckMetadata(
+                key_reference: 0x9A,
+                algo: Some(P256),
+                pin_policy: 0x03,
+                touch_policy: 0x01,
+                origin: 0x01, // generated
+            ),
+            // an invalid policy byte is rejected
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+                pin_policy: Some(0x07),
+                expected_status: IncorrectDataParameter,
+            ),
+            // pin policy "never" cannot be honoured on slots whose keys are sealed to
+            // the pin -- only the card authentication slot stores its key in plain
+            ImportEccKey(
+                key_reference: 0x9A,
+                scalar: "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+                pin_policy: Some(0x01),
+                expected_status: FunctionNotSupported,
+            ),
+            // the management key itself can demand touch (P2 0xFE); the prompt is
+            // granted automatically by the virtual platform on the next authentication
+            IoData(
+                input: "00 FF FF FE 1B 03 9B 18 010203040506070801020304050607080102030405060708",
+            ),
+            IoData(
+                input: "00 F7 00 9B 00",
+                output: Data("01 01 03 02 02 01 02 05 01 01"),
+            ),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
             ),
         ]
     ),

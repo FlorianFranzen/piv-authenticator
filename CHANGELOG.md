@@ -21,6 +21,24 @@
 - Validate the new PIN in RESET RETRY COUNTER
 - Answer NotFound to GET DATA for an unknown data object tag
 - Delete a data object on PUT DATA with an empty object
+- Support importing ECC keys (P-256 and P-384) through the Yubico IMPORT ASYMMETRIC KEY
+  extension, into any asymmetric key slot including the retired ones ([#16][])
+- Clear the management key's default flag when the key is changed
+- Implement GET METADATA for all key references: algorithm, enforced PIN/touch policy,
+  origin and public key for the asymmetric slots (stored at import/generate time), retry
+  counters and default flags for PIN and PUK, and algorithm and default flag for the
+  management key; an empty asymmetric slot answers `6A88` ([#15][])
+- Store and enforce the per-slot pin and touch policies requested through the Yubico
+  DOs at key import and generation, and the touch requirement on the management key
+  (P2 of SET MANAGEMENT KEY). Touch prompts go through trussed's user-presence
+  request; "cached" reuses a confirmed touch for 15 seconds. Pin policy "never" is
+  rejected on every slot but 9E, whose key alone is not stored sealed to the PIN
+  ([#31][], [#32][])
+
+[#15]: https://github.com/trussed-dev/piv-authenticator/issues/15
+[#16]: https://github.com/trussed-dev/piv-authenticator/issues/16
+[#31]: https://github.com/trussed-dev/piv-authenticator/issues/31
+[#32]: https://github.com/trussed-dev/piv-authenticator/issues/32
 
 ## [v0.7.0][] (2026-08-17)
 
