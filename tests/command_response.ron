@@ -529,6 +529,22 @@
                 input: "5C 03 5FFF11",
                 output: All(),
                 expected_status: NotFound,
+        name: "Serial derived from the uuid",
+        uuid_config: WithUuid("00112233445566778899AABBCCDDEEFF"),
+        cmd_resp: [
+            IoData(
+                input: "00 F8 00 00 00",
+                output: Data("00 11 22 33"),
+            ),
+        ]
+    ),
+    IoTest(
+        name: "Serial without a uuid",
+        uuid_config: None,
+        cmd_resp: [
+            IoData(
+                input: "00 F8 00 00 00",
+                output: Data("00 52 F7 43"),
             ),
         ]
     ),
