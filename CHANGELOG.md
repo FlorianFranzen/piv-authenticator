@@ -13,6 +13,7 @@
 - Derive the GET SERIAL response from the device uuid instead of a shared constant
 - Truncate the application identifier at the 5 byte RID so SELECT with a partial
   AID is answered
+- Reset the security state when the application is selected
 
 ## [v0.7.0][] (2026-08-17)
 
