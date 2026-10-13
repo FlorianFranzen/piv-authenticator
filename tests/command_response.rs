@@ -316,7 +316,15 @@ enum IoCmd {
     ImportRsaKey {
         p: String,
         q: String,
-        e: String,
+        #[serde(default)]
+        e: Option<String>,
+        // Yubico's layout, sent as tags 03 to 05 in place of e
+        #[serde(default)]
+        dp: Option<String>,
+        #[serde(default)]
+        dq: Option<String>,
+        #[serde(default)]
+        qinv: Option<String>,
         #[serde(default)]
         expected_status: Status,
     },
@@ -413,8 +421,22 @@ impl IoCmd {
                 p,
                 q,
                 e,
+                dp,
+                dq,
+                qinv,
                 expected_status,
-            } => Self::run_import_rsa_key(p, q, e, *expected_status, card),
+            } => Self::run_import_rsa_key(
+                &[
+                    (0x01, Some(p)),
+                    (0x02, Some(q)),
+                    (0x03, e.as_ref()),
+                    (0x03, dp.as_ref()),
+                    (0x04, dq.as_ref()),
+                    (0x05, qinv.as_ref()),
+                ],
+                *expected_status,
+                card,
+            ),
             Self::Sign {
                 algo,
                 key_reference,
@@ -454,20 +476,20 @@ impl IoCmd {
         );
     }
     fn run_import_rsa_key(
-        p: &str,
-        q: &str,
-        e: &str,
+        elements: &[(u8, Option<&String>)],
         expected_status: Status,
         card: &mut setup::Piv,
     ) {
-        let p = parse_hex(p);
-        let q = parse_hex(q);
-        let e = parse_hex(e);
-        let data: Vec<u8> = [tlv(&[0x01], &p), tlv(&[0x02], &q), tlv(&[0x03], &e)]
-            .into_iter()
-            .flatten()
+        let elements: Vec<(u8, Vec<u8>)> = elements
+            .iter()
+            .filter_map(|&(tag, value)| Some((tag, parse_hex(value?))))
             .collect();
-        let algo = match p.len() {
+        let data: Vec<u8> = elements
+            .iter()
+            .flat_map(|(tag, value)| tlv(&[*tag], value))
+            .collect();
+        // p comes first and its length gives the key size
+        let algo = match elements[0].1.len() {
             128 => 0x07,
             192 => 0x05,
             256 => 0x16,

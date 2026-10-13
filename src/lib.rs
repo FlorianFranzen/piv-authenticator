@@ -1064,7 +1064,10 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
         }
 
         match (algo, key) {
-            // TODO: document Here we do not exactly follow the Yubico extensions to fit better with our RSA backend requirements
+            // Two layouts are accepted. Ours is 01 p, 02 q, 03 e, which is all the RSA backends
+            // take. Yubico's is the CRT form 01 p, 02 q, 03 dP, 04 dQ, 05 qInv with e = 65537
+            // implied, as sent by ykman and yubico-piv-tool. Tag 03 is e in one and dP in the
+            // other, so the presence of 04 and 05 tells them apart.
             #[cfg(feature = "rsa")]
             (
                 AsymmetricAlgorithms::Rsa2048
@@ -1075,7 +1078,18 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 use trussed_rsa_types::RsaImportFormat;
                 let p = tlv::get_do(&[0x01], data).ok_or(Status::IncorrectDataParameter)?;
                 let q = tlv::get_do(&[0x02], data).ok_or(Status::IncorrectDataParameter)?;
-                let e = tlv::get_do(&[0x03], data).ok_or(Status::IncorrectDataParameter)?;
+                let e = match (tlv::get_do(&[0x04], data), tlv::get_do(&[0x05], data)) {
+                    (Some(dq), Some(_qinv)) => {
+                        let dp =
+                            tlv::get_do(&[0x03], data).ok_or(Status::IncorrectDataParameter)?;
+                        if !rsa_crt_exponents_match_65537(p, q, dp, dq) {
+                            warn!("RSA CRT exponents do not match e = 65537");
+                            return Err(Status::IncorrectDataParameter);
+                        }
+                        &[0x01, 0x00, 0x01][..]
+                    }
+                    _ => tlv::get_do(&[0x03], data).ok_or(Status::IncorrectDataParameter)?,
+                };
                 let id = syscall!(self.trussed.unsafe_inject_key(
                     algo.key_mechanism(),
                     &RsaImportFormat { e, p, q }.serialize().map_err(|_err| {
@@ -1098,6 +1112,41 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
             _ => Err(Status::FunctionNotSupported),
         }
     }
+}
+
+/// Checks that `dp` and `dq` are the CRT exponents of the primes `p` and `q` for e = 65537
+///
+/// Yubico's import layout carries no public exponent and its clients always use 65537, while the
+/// RSA backends only take `e` and derive the private exponent from it. A key made for any other
+/// exponent would silently import as a different key, so it is rejected instead.
+#[cfg(feature = "rsa")]
+fn rsa_crt_exponents_match_65537(p: &[u8], q: &[u8], dp: &[u8], dq: &[u8]) -> bool {
+    use crypto_bigint::{NonZero, U4096};
+    use subtle::{Choice, ConstantTimeEq, ConstantTimeGreater};
+
+    fn parse(bytes: &[u8]) -> Option<U4096> {
+        let mut buffer = [0; U4096::BYTES];
+        // Bounding every value to the 2048 bit primes of RSA 4096 keeps e * d from overflowing
+        if bytes.len() > buffer.len() / 2 {
+            return None;
+        }
+        buffer[U4096::BYTES - bytes.len()..].copy_from_slice(bytes);
+        Some(U4096::from_be_slice(&buffer))
+    }
+
+    fn matches(prime: &[u8], exponent: &[u8]) -> Choice {
+        let (Some(prime), Some(exponent)) = (parse(prime), parse(exponent)) else {
+            return Choice::from(0);
+        };
+        let product = exponent.wrapping_mul(&U4096::from_u32(65537));
+        // A prime of 0 would wrap around to a nonzero modulus, hence the explicit lower bound
+        let remainder = NonZero::new(prime.wrapping_sub(&U4096::ONE))
+            .map(|modulus| product.rem(&modulus))
+            .unwrap_or(U4096::ZERO);
+        prime.ct_gt(&U4096::ONE) & remainder.ct_eq(&U4096::ONE)
+    }
+
+    (matches(p, dp) & matches(q, dq)).into()
 }
 
 /// Super trait with all trussed extensions required by opcard

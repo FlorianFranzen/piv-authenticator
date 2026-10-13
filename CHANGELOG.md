@@ -8,6 +8,8 @@
   default (5)
 - Fix the inverted parsing of the touch requirement in SET MANAGEMENT KEY's P2
   (0xFF means no touch, 0xFE means touch required)
+- Accept RSA key import in Yubico's layout (p, q, dP, dQ, qInv with an implied e = 65537),
+  as sent by ykman and yubico-piv-tool
 
 ## [v0.7.0][] (2026-08-17)
 
