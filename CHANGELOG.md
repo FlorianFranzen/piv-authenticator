@@ -10,6 +10,7 @@
   (0xFF means no touch, 0xFE means touch required)
 - Accept RSA key import in Yubico's layout (p, q, dP, dQ, qInv with an implied e = 65537),
   as sent by ykman and yubico-piv-tool
+- Allow RSA key import into every key slot instead of only 9A
 
 ## [v0.7.0][] (2026-08-17)
 

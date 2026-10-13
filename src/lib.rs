@@ -1073,7 +1073,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                 AsymmetricAlgorithms::Rsa2048
                 | AsymmetricAlgorithms::Rsa3072
                 | AsymmetricAlgorithms::Rsa4096,
-                AsymmetricKeyReference::PivAuthentication,
+                _,
             ) => {
                 use trussed_rsa_types::RsaImportFormat;
                 let p = tlv::get_do(&[0x01], data).ok_or(Status::IncorrectDataParameter)?;
@@ -1096,7 +1096,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
                         error!("Failed rsa import serialization: {_err:?}");
                         Status::UnspecifiedNonpersistentExecutionError
                     })?,
-                    AsymmetricKeyReference::PivAuthentication.storage(self.options.storage),
+                    key.storage(self.options.storage),
                     KeySerialization::RsaParts
                 ))
                 .key;
