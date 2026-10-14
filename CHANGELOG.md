@@ -16,6 +16,9 @@
 - Reset the security state when the application is selected
 - Report the remaining retries from a failed CHANGE REFERENCE DATA
 - Answer GET DATA for an empty key history object with NotFound
+- Let a malformed PIN of the right length burn a retry instead of rejecting it as a
+  format error
+- Validate the new PIN in RESET RETRY COUNTER
 
 ## [v0.7.0][] (2026-08-17)
 
