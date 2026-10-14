@@ -350,6 +350,10 @@ fn default_puk() -> String {
     "3132333435363738".into()
 }
 
+fn default_rsa_key_reference() -> u8 {
+    0x9A
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 enum IoCmd {
@@ -413,11 +417,20 @@ enum IoCmd {
         #[serde(default)]
         expected_status: Status,
     },
-    // Only works for 0x9A
     ImportRsaKey {
+        #[serde(default = "default_rsa_key_reference")]
+        key_reference: u8,
         p: String,
         q: String,
-        e: String,
+        #[serde(default)]
+        e: Option<String>,
+        // Yubico's layout, sent as tags 03 to 05 in place of e
+        #[serde(default)]
+        dp: Option<String>,
+        #[serde(default)]
+        dq: Option<String>,
+        #[serde(default)]
+        qinv: Option<String>,
         #[serde(default)]
         expected_status: Status,
     },
@@ -556,11 +569,27 @@ impl IoCmd {
                 expected_status,
             } => Self::run_change_puk(old, new, *expected_status, card),
             Self::ImportRsaKey {
+                key_reference,
                 p,
                 q,
                 e,
+                dp,
+                dq,
+                qinv,
                 expected_status,
-            } => Self::run_import_rsa_key(p, q, e, *expected_status, card),
+            } => Self::run_import_rsa_key(
+                *key_reference,
+                &[
+                    (0x01, Some(p)),
+                    (0x02, Some(q)),
+                    (0x03, e.as_ref()),
+                    (0x03, dp.as_ref()),
+                    (0x04, dq.as_ref()),
+                    (0x05, qinv.as_ref()),
+                ],
+                *expected_status,
+                card,
+            ),
             Self::ImportEccKey {
                 key_reference,
                 scalar,
@@ -638,27 +667,28 @@ impl IoCmd {
         );
     }
     fn run_import_rsa_key(
-        p: &str,
-        q: &str,
-        e: &str,
+        key_reference: u8,
+        elements: &[(u8, Option<&String>)],
         expected_status: Status,
         card: &mut setup::Piv,
     ) {
-        let p = parse_hex(p);
-        let q = parse_hex(q);
-        let e = parse_hex(e);
-        let data: Vec<u8> = [tlv(&[0x01], &p), tlv(&[0x02], &q), tlv(&[0x03], &e)]
-            .into_iter()
-            .flatten()
+        let elements: Vec<(u8, Vec<u8>)> = elements
+            .iter()
+            .filter_map(|&(tag, value)| Some((tag, parse_hex(value?))))
             .collect();
-        let algo = match p.len() {
+        let data: Vec<u8> = elements
+            .iter()
+            .flat_map(|(tag, value)| tlv(&[*tag], value))
+            .collect();
+        // p comes first and its length gives the key size
+        let algo = match elements[0].1.len() {
             128 => 0x07,
             192 => 0x05,
             256 => 0x16,
             _ => panic!("Invalid RSA key size"),
         };
         Self::run_bytes(
-            &build_command(0x00, 0xFE, algo, 0x9A, &data, 0),
+            &build_command(0x00, 0xFE, algo, key_reference, &data, 0),
             &MATCH_EMPTY,
             expected_status,
             card,
