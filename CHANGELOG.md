@@ -45,6 +45,12 @@
 - Add X25519 key generation, import and key agreement (algorithm identifier `0xE1`)
 - Answer `6A80` instead of panicking when the backend does not provide the mechanism
   GENERATE ASYMMETRIC or an RSA IMPORT ASYMMETRIC KEY asks for
+- Support importing ECC keys (P-256 and P-384) through the Yubico IMPORT ASYMMETRIC KEY
+  extension, into any asymmetric key slot including the retired ones ([#16][])
+- Accept ECDSA digests of any length up to the curve's field size, left-padded like a
+  YubiKey does, instead of exactly the field size
+
+[#16]: https://github.com/trussed-dev/piv-authenticator/issues/16
 
 ## [v0.7.0][] (2026-08-17)
 
