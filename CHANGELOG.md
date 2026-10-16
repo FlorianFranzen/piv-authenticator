@@ -20,6 +20,7 @@
   format error
 - Validate the new PIN in RESET RETRY COUNTER
 - Answer NotFound to GET DATA for an unknown data object tag
+- Delete a data object on PUT DATA with an empty object
 
 ## [v0.7.0][] (2026-08-17)
 
