@@ -242,16 +242,8 @@ impl AsymmetricAlgorithms {
             Self::Rsa2048 | Self::Rsa3072 | Self::Rsa4096 => None,
             Self::P256 => Some(32),
             Self::P384 => Some(48),
-        }
-    }
-
-    /// Length of the private scalar, none for RSA
-    pub fn scalar_len(self) -> Option<usize> {
-        match self {
-            #[cfg(feature = "rsa")]
-            Self::Rsa2048 | Self::Rsa3072 | Self::Rsa4096 => None,
-            Self::P256 => Some(32),
-            Self::P384 => Some(48),
+            // the curve25519 keys are imported through their own 32 byte DOs
+            Self::Ed25519 | Self::X25519 => None,
         }
     }
 
