@@ -54,6 +54,8 @@
 - Accept RSA key import in Yubico's layout (p, q, dP, dQ, qInv with an implied e = 65537),
   as sent by ykman and yubico-piv-tool
 - Allow RSA key import into every key slot instead of only 9A
+- List only the algorithms the build supports in the SELECT response: the RSA sizes with the
+  `rsa` feature, P-384 unless `Options::p384(false)` says the trussed backend lacks it
 
 ## [v0.7.0][] (2026-08-17)
 

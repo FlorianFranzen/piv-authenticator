@@ -1051,29 +1051,53 @@ impl IoCmd {
     }
 
     fn run_select(card: &mut setup::Piv) {
-        let matcher = OutputMatcher::Bytes(Cow::Borrowed(&hex!(
-            "61 6f" // Card application property template
-                "4f 06 000010000100" // Application identifier
-                "50 0c 4e6974726f6b657920504956" // Application label = b\"Nitrokey PIV\"
+        Self::run_select_expecting_p384(true, card)
+    }
 
-                // URL = b\"https://github.com/Nitrokey/piv-authenticator\"
-                "5f50 2d 68747470733a2f2f6769746875622e636f6d2f4e6974726f6b65792f7069762d61757468656e74696361746f72"
-                // Cryptographic Algorithm Identifier Template
-                "ac 1e"
-                    "80 01 03" // TDES - ECB
-                    "80 01 0c" // AES256 - ECB
-                    "80 01 11" // P-256
-                    "80 01 07" // RSA 2048
-                    "80 01 05" // RSA 3072
-                    "80 01 16" // RSA 4096
-                    "80 01 14" // P384
-                    "80 01 e0" // Ed25519
-                    "80 01 e1" // X25519
-                    "06 01 00"
-                // Coexistent Tag Allocation Authority Template
-                "79 07"
-                    "4f 05 a000000308"
-        )));
+    /// SELECT, matching the algorithms the build advertises: RSA with the `rsa` feature,
+    /// P-384 when the options say the backend has it
+    fn run_select_expecting_p384(p384: bool, card: &mut setup::Piv) {
+        let mut algorithms = vec![
+            0x03, // TDES - ECB
+            0x0c, // AES256 - ECB
+            0x11, // P-256
+        ];
+        if cfg!(feature = "rsa") {
+            algorithms.extend([
+                0x07, // RSA 2048
+                0x05, // RSA 3072
+                0x16, // RSA 4096
+            ]);
+        }
+        if p384 {
+            algorithms.push(0x14); // P384
+        }
+        algorithms.extend([
+            0xe0, // Ed25519
+            0xe1, // X25519
+        ]);
+        // Cryptographic Algorithm Identifier Template
+        let mut template: Vec<u8> = algorithms.iter().flat_map(|a| [0x80, 0x01, *a]).collect();
+        template.extend(hex!("06 01 00"));
+
+        let mut body = hex!(
+            "4f 06 000010000100" // Application identifier
+            "50 0c 4e6974726f6b657920504956" // Application label = b\"Nitrokey PIV\"
+            // URL = b\"https://github.com/Nitrokey/piv-authenticator\"
+            "5f50 2d 68747470733a2f2f6769746875622e636f6d2f4e6974726f6b65792f7069762d61757468656e74696361746f72"
+        )
+        .to_vec();
+        body.push(0xac);
+        body.push(template.len() as u8);
+        body.extend(template);
+        // Coexistent Tag Allocation Authority Template
+        body.extend(hex!("79 07" "4f 05 a000000308"));
+
+        // Card application property template
+        let mut expected = vec![0x61, body.len() as u8];
+        expected.extend(body);
+
+        let matcher = OutputMatcher::Bytes(Cow::Owned(expected));
         Self::run_bytes(
             &hex!("00 A4 04 00 0B A000000308000010000100 00"),
             &matcher,
@@ -1162,4 +1186,12 @@ fn command_response() {
             _ => {}
         }
     }
+}
+
+/// A runner whose trussed backend lacks P-384 leaves it out of the SELECT response
+#[test_log::test]
+fn select_without_p384() {
+    setup::piv(setup::WITHOUT_UUID.p384(false), |card| {
+        IoCmd::run_select_expecting_p384(false, card)
+    });
 }
