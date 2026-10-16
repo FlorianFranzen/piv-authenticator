@@ -15,6 +15,7 @@
   AID is answered
 - Reset the security state when the application is selected
 - Report the remaining retries from a failed CHANGE REFERENCE DATA
+- Answer GET DATA for an empty key history object with NotFound
 
 ## [v0.7.0][] (2026-08-17)
 
