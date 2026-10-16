@@ -5,6 +5,9 @@
 // Now you should be able to see the card in `pcsc_scan` and talk to it with `piv-tool`r
 //
 // Set `RUST_LOG=piv_authenticator::card=info` to see the executed commands.
+//
+// Set `VPICC_USER_PRESENCE` to a file to decide touch requests from a test: `deny` in it
+// refuses them, anything else grants them. Unset, every request is granted.
 
 // TODO: add CLI
 
