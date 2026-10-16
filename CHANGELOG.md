@@ -8,6 +8,8 @@
   default (5)
 - Fix the inverted parsing of the touch requirement in SET MANAGEMENT KEY's P2
   (0xFF means no touch, 0xFE means touch required)
+- List only the algorithms the build supports in the SELECT response: the RSA sizes with the
+  `rsa` feature, P-384 unless `Options::p384(false)` says the trussed backend lacks it
 
 ## [v0.7.0][] (2026-08-17)
 

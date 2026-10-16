@@ -49,6 +49,7 @@ pub struct Options {
     label: &'static [u8],
     url: &'static [u8],
     uuid: Option<[u8; 16]>,
+    p384: bool,
 }
 
 impl Default for Options {
@@ -64,6 +65,7 @@ impl Options {
             label: NITROKEY_APPLICATION_LABEL,
             url: NITROKEY_APPLICATION_URL,
             uuid: None,
+            p384: true,
         }
     }
 
@@ -78,6 +80,34 @@ impl Options {
     }
     pub const fn uuid(self, uuid: Option<[u8; 16]>) -> Self {
         Self { uuid, ..self }
+    }
+    /// Whether the trussed backend provides the P-384 mechanism (it does by default).
+    ///
+    /// trussed cannot be asked which mechanisms its backend implements, so a runner built
+    /// without P-384 says so here. The SELECT response then leaves P-384 out, and a client
+    /// can refuse the card before it resets it rather than fail at the import.
+    pub const fn p384(self, p384: bool) -> Self {
+        Self { p384, ..self }
+    }
+
+    /// The algorithms the SELECT response advertises, in its fixed order: RSA only with the
+    /// `rsa` feature, P-384 only when the backend has it
+    fn supported_algorithms(&self) -> heapless::Vec<piv_types::Algorithms, 7> {
+        use piv_types::Algorithms::*;
+        let mut algorithms = heapless::Vec::new();
+        let mut push = |algorithm| algorithms.push(algorithm).ok();
+        push(Tdes);
+        push(Aes256);
+        push(P256);
+        if cfg!(feature = "rsa") {
+            push(Rsa2048);
+            push(Rsa3072);
+            push(Rsa4096);
+        }
+        if self.p384 {
+            push(P384);
+        }
+        algorithms
     }
 }
 
@@ -133,15 +163,13 @@ where
     pub fn deselect(&mut self) {}
 
     pub fn select(&mut self, mut reply: Reply<'_>) -> Result {
-        use piv_types::Algorithms::*;
         info!("selecting PIV maybe");
 
+        let algorithms = self.options.supported_algorithms();
         let application_property_template = piv_types::ApplicationPropertyTemplate::default()
             .with_application_label(self.options.label)
             .with_application_url(self.options.url)
-            .with_supported_cryptographic_algorithms(&[
-                Tdes, Aes256, P256, Rsa2048, Rsa3072, Rsa4096, P384,
-            ]);
+            .with_supported_cryptographic_algorithms(&algorithms);
 
         application_property_template
             .encode_to_heapless_vec(*reply)
