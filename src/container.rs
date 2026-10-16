@@ -405,6 +405,48 @@ pub enum Container {
     PairingCodeReferenceDataContainer,
 }
 
+impl Container {
+    /// Every container, in declaration order
+    pub const ALL: [Container; 36] = [
+        Container::CardCapabilityContainer,
+        Container::CardHolderUniqueIdentifier,
+        Container::X509CertificateFor9A,
+        Container::CardholderFingerprints,
+        Container::SecurityObject,
+        Container::CardholderFacialImage,
+        Container::X509CertificateFor9E,
+        Container::X509CertificateFor9C,
+        Container::X509CertificateFor9D,
+        Container::PrintedInformation,
+        Container::DiscoveryObject,
+        Container::KeyHistoryObject,
+        Container::RetiredCert01,
+        Container::RetiredCert02,
+        Container::RetiredCert03,
+        Container::RetiredCert04,
+        Container::RetiredCert05,
+        Container::RetiredCert06,
+        Container::RetiredCert07,
+        Container::RetiredCert08,
+        Container::RetiredCert09,
+        Container::RetiredCert10,
+        Container::RetiredCert11,
+        Container::RetiredCert12,
+        Container::RetiredCert13,
+        Container::RetiredCert14,
+        Container::RetiredCert15,
+        Container::RetiredCert16,
+        Container::RetiredCert17,
+        Container::RetiredCert18,
+        Container::RetiredCert19,
+        Container::RetiredCert20,
+        Container::CardholderIrisImages,
+        Container::BiometricInformationTemplatesGroupTemplate,
+        Container::SecureMessagingCertificateSigner,
+        Container::PairingCodeReferenceDataContainer,
+    ];
+}
+
 // these are just the "contact" rules, need to model "contactless" also
 pub enum ReadAccessRule {
     Always,

@@ -956,10 +956,11 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
     }
 
     fn get_data(&mut self, container: Container, mut reply: Reply<'_>) -> Result {
+        let written = self.state.persistent.may_be_written(container);
         let read_valid =
             self.state
                 .volatile
-                .read_valid_key(container, self.trussed, self.options)?;
+                .read_valid_key(container, written, self.trussed, self.options)?;
 
         use state::ContainerStorage;
         let tag = match container {
@@ -1012,6 +1013,7 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
         };
 
         use state::ContainerStorage;
+        self.state.persistent.mark_written(container, self.trussed);
         ContainerStorage(container).save(self.trussed, data, self.options.storage)
     }
 
@@ -1034,7 +1036,9 @@ impl<T: Client> LoadedAuthenticator<'_, T> {
 
         let mut num_certs = 0;
         for c in RETIRED_CERTS {
-            if ContainerStorage(c).exists(self.trussed, self.options.storage)? {
+            if self.state.persistent.may_be_written(c)
+                && ContainerStorage(c).exists(self.trussed, self.options.storage)?
+            {
                 num_certs += 1;
             }
         }

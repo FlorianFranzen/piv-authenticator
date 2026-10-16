@@ -521,4 +521,41 @@
             ),
         ],
     ),
+    IoTest(
+        name: "Key history counts the retired certificates written",
+        cmd_resp: [
+            GetData(
+                input: "5C 03 5FC10C",
+                output: Data("53 08 c1 01 00 c2 01 00 fe 00")
+            ),
+            GetData(
+                input: "5C 03 5FC10D",
+                output: All(),
+                expected_status: NotFound,
+            ),
+            AuthenticateManagement(
+                key: (
+                    algorithm: Tdes,
+                    key: "0102030405060708 0102030405060708 0102030405060708"
+                ),
+                mutual: false,
+            ),
+            PutData(
+                input: "5C 03 5FC10D 53 10 000102030405060708090A0B0C0D0E0F",
+            ),
+            GetData(
+                input: "5C 03 5FC10D",
+                output: Data("53 10 000102030405060708090A0B0C0D0E0F")
+            ),
+            GetData(
+                input: "5C 03 5FC10C",
+                output: Data("53 08 c1 01 01 c2 01 00 fe 00")
+            ),
+            GetData(
+                input: "5C 03 5FC10E",
+                output: All(),
+                expected_status: NotFound,
+            ),
+        ]
+    ),
 ]

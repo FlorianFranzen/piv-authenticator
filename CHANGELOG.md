@@ -8,6 +8,9 @@
   default (5)
 - Fix the inverted parsing of the touch requirement in SET MANAGEMENT KEY's P2
   (0xFF means no touch, 0xFE means touch required)
+- Answer GET DATA and the key history object for data objects that were never written
+  without looking them up in the filesystem, from a map of written objects kept in the
+  persistent state (#40)
 
 ## [v0.7.0][] (2026-08-17)
 

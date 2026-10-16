@@ -423,6 +423,15 @@ pub struct Persistent {
     pub keys: Keys,
     // Ideally, we'd dogfood a "Monotonic Counter" from `trussed`.
     timestamp: u32,
+    /// Containers that may hold a file, one bit each, see [`written_bit`].
+    ///
+    /// A clear bit means the container was not written since the last reset, so reading it
+    /// needs no filesystem access, which costs about 127 ms per empty object on external
+    /// flash (#40). The bit is set before the file is written, so a set bit only means the
+    /// file may exist. States saved before the map existed lack it; it is then rebuilt from
+    /// the filesystem once, on load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    written_containers: Option<u64>,
     #[serde(skip, default = "volatile")]
     storage: Location,
 }
@@ -444,6 +453,8 @@ pub struct GlobalSecurityStatus {}
 pub enum ReadValid {
     /// Container can be read in plain text
     Plain,
+    /// Container was never written, so only its default can answer
+    NotWritten,
     /// Container is stored encrypted but is also not found
     EncryptedNotFound,
     /// Container can be read with read_encrypted_chunk using the key
@@ -500,9 +511,14 @@ impl Volatile {
         }
     }
 
+    /// How `container` can be read, after checking the caller may read it at all
+    ///
+    /// `written` is false when the container is known to hold no file; the access rules still
+    /// apply, but the key that would decrypt it is not looked for.
     pub fn read_valid_key(
         &mut self,
         container: Container,
+        written: bool,
         client: &mut impl crate::Client,
         options: &crate::Options,
     ) -> Result<ReadValid, Status> {
@@ -514,6 +530,7 @@ impl Volatile {
                 warn!("Unauthorized attempt to access: {:?}", container);
                 return Err(Status::SecurityStatusNotSatisfied);
             }
+            _ if !written => return Ok(ReadValid::NotWritten),
             (ReadAccessRule::Always, _) => {
                 return Ok(ReadValid::Plain);
             }
@@ -997,6 +1014,7 @@ impl Persistent {
         let mut state = Self {
             keys,
             timestamp: 0,
+            written_containers: Some(written_bit(Container::CardHolderUniqueIdentifier)),
             storage: options.storage,
         };
         state.generate_asymmetric_key(
@@ -1025,10 +1043,34 @@ impl Persistent {
             Status::UnspecifiedPersistentExecutionError
         })?;
         parsed.storage = options.storage;
+        if parsed.written_containers.is_none() {
+            let mut written = 0;
+            for container in Container::ALL {
+                if ContainerStorage(container).exists(client, options.storage)? {
+                    written |= written_bit(container);
+                }
+            }
+            parsed.written_containers = Some(written);
+            parsed.save(client);
+        }
         Ok(parsed)
     }
 
-    pub fn save(&mut self, client: &mut impl crate::Client) {
+    /// Whether `container` may hold a file; false only when it certainly holds none
+    pub fn may_be_written(&self, container: Container) -> bool {
+        self.written_containers
+            .is_none_or(|written| written & written_bit(container) != 0)
+    }
+
+    /// Record that `container` is about to be written, before the file is
+    pub fn mark_written(&mut self, container: Container, client: &mut impl crate::Client) {
+        if !self.may_be_written(container) {
+            *self.written_containers.get_or_insert(0) |= written_bit(container);
+            self.save(client);
+        }
+    }
+
+    pub fn save(&self, client: &mut impl crate::Client) {
         let mut data = Message::new();
         cbor_smol::cbor_serialize_to(&self, &mut data).unwrap();
 
@@ -1040,6 +1082,54 @@ impl Persistent {
         self.save(client);
         self.timestamp
     }
+}
+
+/// The bit of `container` in [`Persistent::written_containers`]
+///
+/// Taken from the object's tag rather than the enum, so that containers added later cannot
+/// move the bits a saved state already uses: a 5FC1xx object takes bit xx, the discovery
+/// object bit 0 and the biometric group template bit 0x24.
+fn written_bit(container: Container) -> u64 {
+    use Container::*;
+    let bit = match container {
+        DiscoveryObject => 0x00,
+        X509CertificateFor9E => 0x01,
+        CardHolderUniqueIdentifier => 0x02,
+        CardholderFingerprints => 0x03,
+        X509CertificateFor9A => 0x05,
+        SecurityObject => 0x06,
+        CardCapabilityContainer => 0x07,
+        CardholderFacialImage => 0x08,
+        PrintedInformation => 0x09,
+        X509CertificateFor9C => 0x0A,
+        X509CertificateFor9D => 0x0B,
+        KeyHistoryObject => 0x0C,
+        RetiredCert01 => 0x0D,
+        RetiredCert02 => 0x0E,
+        RetiredCert03 => 0x0F,
+        RetiredCert04 => 0x10,
+        RetiredCert05 => 0x11,
+        RetiredCert06 => 0x12,
+        RetiredCert07 => 0x13,
+        RetiredCert08 => 0x14,
+        RetiredCert09 => 0x15,
+        RetiredCert10 => 0x16,
+        RetiredCert11 => 0x17,
+        RetiredCert12 => 0x18,
+        RetiredCert13 => 0x19,
+        RetiredCert14 => 0x1A,
+        RetiredCert15 => 0x1B,
+        RetiredCert16 => 0x1C,
+        RetiredCert17 => 0x1D,
+        RetiredCert18 => 0x1E,
+        RetiredCert19 => 0x1F,
+        RetiredCert20 => 0x20,
+        CardholderIrisImages => 0x21,
+        SecureMessagingCertificateSigner => 0x22,
+        PairingCodeReferenceDataContainer => 0x23,
+        BiometricInformationTemplatesGroupTemplate => 0x24,
+    };
+    1 << bit
 }
 
 fn load_if_exists(
@@ -1226,7 +1316,7 @@ impl ContainerStorage {
         let encryption = match read_valid {
             ReadValid::Plain => None,
             ReadValid::Encrypted(key) => Some(key),
-            ReadValid::EncryptedNotFound => {
+            ReadValid::EncryptedNotFound | ReadValid::NotWritten => {
                 if let Some(data) = self.default() {
                     reply.append_len(data.len())?;
                     reply.expand(&data)?;
@@ -1314,5 +1404,70 @@ impl ContainerStorage {
 
         syscall!(client.clear(key_to_seal));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dev_vpicc::virt::with_ram_client;
+    use trussed_core::{syscall, FilesystemClient};
+
+    #[test]
+    fn every_container_has_its_own_bit() {
+        let mut seen = 0u64;
+        for container in Container::ALL {
+            let bit = written_bit(container);
+            assert_eq!(seen & bit, 0, "{container:?} shares a bit");
+            seen |= bit;
+        }
+        // The bits are part of the saved state: these must never move
+        assert_eq!(written_bit(Container::DiscoveryObject), 1);
+        assert_eq!(written_bit(Container::KeyHistoryObject), 1 << 0x0C);
+        assert_eq!(written_bit(Container::RetiredCert20), 1 << 0x20);
+    }
+
+    #[test]
+    fn written_containers_rebuilt_for_states_saved_before_the_map() {
+        with_ram_client("piv", |mut client| {
+            let options = crate::Options::new().storage(Location::Internal);
+            let state = Persistent::load_or_initialize(&mut client, &options).unwrap();
+            state.save(&mut client);
+            assert!(state.may_be_written(Container::CardHolderUniqueIdentifier));
+            assert!(!state.may_be_written(Container::RetiredCert01));
+
+            // An older firmware writes a container without recording it, then saves its
+            // state without the map
+            ContainerStorage(Container::RetiredCert01)
+                .save(&mut client, &[0x70, 0x00], options.storage)
+                .unwrap();
+            let path = PathBuf::from(Persistent::FILENAME);
+            let data = syscall!(client.read_file(options.storage, path.clone())).data;
+            let mut fields: serde_cbor::Value = serde_cbor::from_slice(&data).unwrap();
+            let serde_cbor::Value::Map(map) = &mut fields else {
+                panic!("the state is not a map")
+            };
+            assert!(map
+                .remove(&serde_cbor::Value::Text("written_containers".into()))
+                .is_some());
+            let old = serde_cbor::to_vec(&fields).unwrap();
+            syscall!(client.write_file(
+                options.storage,
+                path.clone(),
+                Message::try_from(old.as_slice()).unwrap(),
+                None
+            ));
+
+            let state = Persistent::load_or_initialize(&mut client, &options).unwrap();
+            assert!(state.may_be_written(Container::RetiredCert01));
+            assert!(state.may_be_written(Container::CardHolderUniqueIdentifier));
+            assert!(!state.may_be_written(Container::RetiredCert02));
+            assert!(!state.may_be_written(Container::X509CertificateFor9A));
+
+            // The rebuilt map is saved, so the scan runs once
+            let data = syscall!(client.read_file(options.storage, path)).data;
+            let saved: Persistent = cbor_smol::cbor_deserialize(&data).unwrap();
+            assert_eq!(saved.written_containers, state.written_containers);
+        })
     }
 }
